@@ -108,6 +108,7 @@ final class AppSettings: ObservableObject {
     @Published var keyboardNumpad = false      // numeric keypad column
     @Published var showFloatingControl = false // draggable touch launcher panel
     @Published var showTrackpad = false        // virtual trackpad panel
+    @Published var showDeck = false            // Stream Deck-style control surface (v3 PoC)
     @Published var trackpadGain = 1.5          // virtual trackpad cursor sensitivity
 
     // MARK: calibration — raw panel coords that map to the screen edges
@@ -157,6 +158,7 @@ final class AppSettings: ObservableObject {
         var palmRejection: Bool?
         var palmPanelGuard: Bool?
         var palmClusterPts: Double?
+        var showDeck: Bool?
     }
 
     static let url = FileManager.default.homeDirectoryForCurrentUser
@@ -195,7 +197,7 @@ final class AppSettings: ObservableObject {
                  showFloatingControl: showFloatingControl,
                  showTrackpad: showTrackpad, trackpadGain: trackpadGain,
                  palmRejection: palmRejection, palmPanelGuard: palmPanelGuard,
-                 palmClusterPts: palmClusterPts)
+                 palmClusterPts: palmClusterPts, showDeck: showDeck)
     }
 
     private func apply(_ s: Snapshot) {
@@ -232,6 +234,7 @@ final class AppSettings: ObservableObject {
         palmRejection = s.palmRejection ?? true
         palmPanelGuard = s.palmPanelGuard ?? true
         palmClusterPts = s.palmClusterPts ?? 56
+        showDeck = s.showDeck ?? false
     }
 
     func save() {
@@ -265,5 +268,6 @@ final class AppSettings: ObservableObject {
         showEdgeZones: false, keyboardOpacity: 0.85,
         keyboardExtendedKeys: true, keyboardLayout: "us", keyboardNumpad: false,
         showFloatingControl: false, showTrackpad: false, trackpadGain: 1.5,
-        palmRejection: true, palmPanelGuard: true, palmClusterPts: 56)
+        palmRejection: true, palmPanelGuard: true, palmClusterPts: 56,
+        showDeck: false)
 }

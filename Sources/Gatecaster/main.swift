@@ -27,6 +27,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var floatingPanel: NSPanel?
     private var trackpadPanel: NSPanel?
     private var padBag: AnyCancellable?
+    private var deckPanel: NSPanel?
+    private var deckBag: AnyCancellable?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         // SINGLE INSTANCE: two engines fighting over the same HID device put the
@@ -124,6 +126,12 @@ final class AppController: NSObject, NSApplicationDelegate {
                 if on { self?.showTrackpad() } else { self?.hideTrackpad() }
                 self?.rebuildMenu()
             }
+        if settings.showDeck { showDeck() }
+        deckBag = settings.$showDeck.dropFirst().receive(on: RunLoop.main)
+            .sink { [weak self] on in
+                if on { self?.showDeck() } else { self?.hideDeck() }
+                self?.rebuildMenu()
+            }
         // Visual strips marking the edge-gesture zones (pure affordance; pass-through),
         // with live state: fingers detected → lighter blue, armed → black.
         engine.onEdgeZoneState = { [weak self] bottomZone, st in
@@ -168,6 +176,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         item(menu, "Settings…", #selector(openSettings))
         item(menu, "Show / Hide Touch Keyboard", #selector(toggleKeyboard))
         item(menu, "Show / Hide Virtual Trackpad", #selector(toggleTrackpad))
+        item(menu, "Show / Hide Deck", #selector(toggleDeck))
         item(menu, "Show / Hide Floating Control", #selector(toggleFloatingControl))
         item(menu, "Choose Touchscreen Display…", #selector(startDisplayPicker))
         item(menu, "Calibrate Touchscreen…", #selector(startCalibration))
@@ -301,11 +310,11 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func isTouchPanel(_ w: NSWindow) -> Bool {
-        w === keyboardPanel || w === floatingPanel || w === trackpadPanel
+        w === keyboardPanel || w === floatingPanel || w === trackpadPanel || w === deckPanel
     }
 
     private func clampAllPanels() {
-        for p in [keyboardPanel, floatingPanel, trackpadPanel].compactMap({ $0 }) {
+        for p in [keyboardPanel, floatingPanel, trackpadPanel, deckPanel].compactMap({ $0 }) {
             clampToTouchDisplay(p)
         }
     }
@@ -427,14 +436,14 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func beginPanelDrag(at cg: CGPoint) -> Bool {
         let flip = NSScreen.screens.first?.frame.maxY ?? 0
-        for panel in [keyboardPanel, floatingPanel, trackpadPanel].compactMap({ $0 }) {
+        for panel in [keyboardPanel, floatingPanel, trackpadPanel, deckPanel].compactMap({ $0 }) {
             let f = panel.frame
             let cgRect = CGRect(x: f.minX, y: flip - f.maxY, width: f.width, height: f.height)
             guard cgRect.contains(cg) else { continue }
             // Full panels (keyboard / trackpad) only drag from the TOP BAR —
             // touches below it pass through to the keys / pad surface.
             // Tabs and the floating launcher stay draggable anywhere.
-            let isFullPanel = (panel === keyboardPanel || panel === trackpadPanel)
+            let isFullPanel = (panel === keyboardPanel || panel === trackpadPanel || panel === deckPanel)
                 && f.width > 240
             let topBar = CGRect(x: cgRect.minX, y: cgRect.minY,
                                 width: cgRect.width, height: 46)
@@ -473,7 +482,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Converts each panel's AppKit (bottom-left) frame to CG coords to compare.
     private func pointIsOverPanel(_ p: CGPoint) -> Bool {
         let flip = NSScreen.screens.first?.frame.maxY ?? 0
-        for panel in [keyboardPanel, floatingPanel, trackpadPanel].compactMap({ $0 }) {
+        for panel in [keyboardPanel, floatingPanel, trackpadPanel, deckPanel].compactMap({ $0 }) {
             let f = panel.frame
             let cg = CGRect(x: f.minX, y: flip - f.maxY, width: f.width, height: f.height)
             if cg.contains(p) { return true }
@@ -510,6 +519,36 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func hideTrackpad() { trackpadPanel?.orderOut(nil); trackpadPanel = nil }
+
+    // MARK: deck panel (v3 PoC — Stream Deck-style control surface)
+    @objc private func toggleDeck() { settings.showDeck.toggle() }
+
+    private func showDeck() {
+        guard deckPanel == nil else { return }
+        let view = DeckView(store: DeckStore.shared, settings: settings) { [weak self] in
+            self?.settings.showDeck = false
+        }
+        let host = NSHostingView(rootView: view)
+        let sf = (nsScreen(for: selectedDisplay) ?? NSScreen.main)?.frame ?? engine.bounds
+        let rect = NSRect(x: sf.minX + 60, y: sf.midY - 200, width: 460, height: 420)
+        host.frame = NSRect(origin: .zero, size: rect.size)
+        let panel = NSPanel(contentRect: rect, styleMask: [.nonactivatingPanel, .borderless],
+                            backing: .buffered, defer: false)
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.isMovableByWindowBackground = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = host
+        panel.setFrame(rect, display: true)
+        panel.orderFrontRegardless()
+        deckPanel = panel
+    }
+
+    private func hideDeck() { deckPanel?.orderOut(nil); deckPanel = nil }
 
     /// Collapsed trackpad: a thin pull tab on the right edge (its active surface
     /// becomes empty automatically, so no touches are intercepted while collapsed).
