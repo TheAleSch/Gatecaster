@@ -1,0 +1,13 @@
+# build artifacts
+.build/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+# macOS noise
+.DS_Store
+# release artifacts (when the pipeline lands)
+dist/
+*.dmg
+# secrets — never commit signing keys or license private keys
+*.p12
+*_private_key*
