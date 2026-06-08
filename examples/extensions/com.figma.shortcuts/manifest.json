@@ -1,0 +1,21 @@
+{
+  "id": "com.figma.shortcuts",
+  "name": "Figma",
+  "symbol": "pencil.and.outline",
+  "colorHex": "#A259FF",
+  "minW": 3,
+  "minH": 2,
+  "defaultW": 4,
+  "defaultH": 2,
+  "fields": [
+    { "label": "Tip", "value": "Buttons fire Figma shortcuts (Figma must be focused)" }
+  ],
+  "buttons": [
+    { "label": "Frame",     "symbol": "square.dashed",        "action": { "kind": "keystroke", "value": "f" } },
+    { "label": "Component", "symbol": "diamond",              "action": { "kind": "keystroke", "value": "cmd+alt+k" } },
+    { "label": "Pen",       "symbol": "scribble",             "action": { "kind": "keystroke", "value": "p" } },
+    { "label": "Text",      "symbol": "textformat",           "action": { "kind": "keystroke", "value": "t" } },
+    { "label": "Dev Mode",  "symbol": "chevron.left.forwardslash.chevron.right", "action": { "kind": "keystroke", "value": "shift+d" } },
+    { "label": "Hide UI",   "symbol": "rectangle.slash",      "action": { "kind": "keystroke", "value": "cmd+backslash" } }
+  ]
+}

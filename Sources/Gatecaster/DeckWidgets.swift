@@ -35,6 +35,10 @@ struct WidgetManifest: Codable, Identifiable {
     var name: String
     var symbol: String?                  // SF Symbol for the header
     var colorHex: String?
+    var minW: Int?                       // smallest span the widget renders well at
+    var minH: Int?
+    var defaultW: Int?                   // span when first dropped (defaults to min)
+    var defaultH: Int?
     var fields: [ManifestField]?         // labels shown; value via refreshKey
     var buttons: [ManifestButton]?       // action buttons in the tile
     var refresh: ManifestRefresh?        // optional polling command → JSON
@@ -126,6 +130,44 @@ final class WidgetDataSource: ObservableObject {
     }
 }
 
+// MARK: - widget sizing (per-kind minimum + default spans)
+
+/// Smallest span a widget renders well at. Resizing clamps to this; extensions
+/// declare their own via the manifest (minW/minH).
+func widgetMinSpan(_ w: DeckWidget) -> (w: Int, h: Int) {
+    switch w.kind {
+    case "volume":  return (1, 2)
+    case "clock":   return (2, 1)
+    case "media":   return (2, 1)
+    case "claude":  return (2, 2)
+    case "battery": return (2, 1)
+    case "cpu":     return (2, 1)
+    default:
+        if let id = w.extensionId, let m = WidgetRegistry.shared.manifest(id: id) {
+            return (max(1, m.minW ?? 2), max(1, m.minH ?? 1))
+        }
+        return (1, 1)
+    }
+}
+
+/// Span a widget gets when first dropped (defaults to its minimum).
+func widgetDefaultSpan(_ kind: String) -> (w: Int, h: Int) {
+    switch kind {
+    case "volume":  return (1, 2)
+    case "clock":   return (2, 1)
+    case "media":   return (2, 1)
+    case "claude":  return (2, 2)
+    case "battery": return (2, 1)
+    case "cpu":     return (2, 1)
+    default:
+        let id = kind.hasPrefix("ext:") ? String(kind.dropFirst(4)) : kind
+        if let m = WidgetRegistry.shared.manifest(id: id) {
+            return (max(1, m.defaultW ?? m.minW ?? 2), max(1, m.defaultH ?? m.minH ?? 2))
+        }
+        return (2, 2)
+    }
+}
+
 // MARK: - widget tile views
 
 /// Renders one widget; the grid sizes it to its span, so the tile fills its
@@ -137,6 +179,8 @@ struct WidgetTile: View {
     var cell: CGFloat = 80          // one grid cell, in points
     var step: CGFloat = 88          // cell + spacing: pitch between cells
     var maxCols: Int = 8
+    var minW: Int = 1               // smallest span (per-kind / manifest)
+    var minH: Int = 1
     var onDelete: () -> Void
 
     @State private var showConfig = false
@@ -215,9 +259,9 @@ struct WidgetTile: View {
         .padding(3)
         .highPriorityGesture(DragGesture(minimumDistance: 2)
             .onChanged { g in
-                previewW = Swift.max(1, Swift.min(maxCols,
+                previewW = Swift.max(minW, Swift.min(maxCols,
                             widget.spanW + Int((g.translation.width / step).rounded())))
-                previewH = Swift.max(1, Swift.min(6,
+                previewH = Swift.max(minH, Swift.min(6,
                             widget.spanH + Int((g.translation.height / step).rounded())))
             }
             .onEnded { _ in
@@ -233,6 +277,8 @@ struct WidgetTile: View {
         case "media": MediaWidget()
         case "volume": VolumeWidget()
         case "claude": ClaudeUsageWidget(config: $widget.config)
+        case "battery": BatteryWidget()
+        case "cpu": CPUWidget()
         default:
             if let id = widget.extensionId,
                let m = WidgetRegistry.shared.manifest(id: id) {
@@ -353,9 +399,9 @@ private struct MediaWidget: View {
             Text("Media").font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.secondary)
             HStack(spacing: 14) {
-                btn("backward.fill") { DeckRunner.postKeystroke("fn+f7") }
-                btn("playpause.fill") { DeckRunner.postKeystroke("fn+f8") }
-                btn("forward.fill") { DeckRunner.postKeystroke("fn+f9") }
+                btn("backward.fill") { DeckRunner.mediaKey(18) }
+                btn("playpause.fill") { DeckRunner.mediaKey(16) }
+                btn("forward.fill") { DeckRunner.mediaKey(17) }
             }
         }
     }
@@ -654,4 +700,126 @@ struct ClaudeUsageWidget: View {
             .frame(height: 6)
         }
     }
+}
+
+// MARK: - built-in: Battery
+
+/// Battery level + charging state via `pmset -g batt` (no extra entitlements).
+private struct BatteryWidget: View {
+    @State private var percent = 0
+    @State private var charging = false
+    @State private var present = true
+    private let tick = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: icon).foregroundColor(tint)
+                Text("Battery").font(.system(size: 12, weight: .semibold))
+            }
+            if present {
+                Text("\(percent)%")
+                    .font(.system(size: 26, weight: .semibold).monospacedDigit())
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.18))
+                        Capsule().fill(tint)
+                            .frame(width: max(4, geo.size.width * CGFloat(percent) / 100))
+                    }
+                }
+                .frame(height: 6)
+            } else {
+                Text("No battery").font(.system(size: 11)).foregroundColor(.secondary)
+            }
+        }
+        .padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear(perform: refresh)
+        .onReceive(tick) { _ in refresh() }
+    }
+    private var tint: Color {
+        if charging { return .green }
+        return percent <= 20 ? .red : .accentColor
+    }
+    private var icon: String {
+        charging ? "battery.100.bolt"
+            : percent <= 20 ? "battery.25" : "battery.100"
+    }
+    private func refresh() {
+        DispatchQueue.global(qos: .utility).async {
+            let out = shell("/usr/bin/pmset", ["-g", "batt"])
+            var pct = 0, chg = false, has = false
+            if let m = out.range(of: #"(\d+)%"#, options: .regularExpression) {
+                pct = Int(out[m].dropLast()) ?? 0; has = true
+            }
+            let low = out.lowercased()
+            chg = low.contains("charging") || low.contains("charged") || low.contains("ac power")
+            if low.contains("discharging") { chg = false }
+            DispatchQueue.main.async { percent = pct; charging = chg; present = has }
+        }
+    }
+}
+
+// MARK: - built-in: CPU load
+
+/// System-wide CPU usage (%), sampled from host_processor_info deltas.
+private struct CPUWidget: View {
+    @State private var usage = 0
+    @State private var prevTicks: (user: UInt32, sys: UInt32, idle: UInt32, nice: UInt32)?
+    private let tick = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "cpu").foregroundColor(.accentColor)
+                Text("CPU").font(.system(size: 12, weight: .semibold))
+            }
+            Text("\(usage)%")
+                .font(.system(size: 26, weight: .semibold).monospacedDigit())
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.18))
+                    Capsule().fill(usage > 80 ? Color.red : Color.accentColor)
+                        .frame(width: max(4, geo.size.width * CGFloat(usage) / 100))
+                }
+            }
+            .frame(height: 6)
+        }
+        .padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear(perform: sample)
+        .onReceive(tick) { _ in sample() }
+    }
+
+    private func sample() {
+        // Compute the count from the struct size (HOST_CPU_LOAD_INFO_COUNT isn't
+        // reliably imported into Swift); host_cpu_load_info_data_t is the value type.
+        var count = mach_msg_type_number_t(
+            MemoryLayout<host_cpu_load_info_data_t>.stride / MemoryLayout<integer_t>.stride)
+        var info = host_cpu_load_info_data_t()
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &count)
+            }
+        }
+        guard kr == KERN_SUCCESS else { return }
+        let u = info.cpu_ticks.0, s = info.cpu_ticks.1, i = info.cpu_ticks.2, n = info.cpu_ticks.3
+        if let p = prevTicks {
+            let du = Double(u &- p.user), ds = Double(s &- p.sys)
+            let di = Double(i &- p.idle), dn = Double(n &- p.nice)
+            let busy = du + ds + dn, total = busy + di
+            if total > 0 { usage = Int((busy / total) * 100) }
+        }
+        prevTicks = (u, s, i, n)
+    }
+}
+
+/// Run a process and return its stdout as a string (utility queue caller).
+private func shell(_ exe: String, _ args: [String]) -> String {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: exe)
+    p.arguments = args
+    let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
+    guard (try? p.run()) != nil else { return "" }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    p.waitUntilExit()
+    return String(data: data, encoding: .utf8) ?? ""
 }

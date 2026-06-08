@@ -50,7 +50,13 @@ struct DeckView: View {
         let packed = packLayout(columns: cols)
         return GeometryReader { geo in
             let cell = (geo.size.width - spacing * CGFloat(cols - 1)) / CGFloat(cols)
-            let gridRows = packed.rows + (store.editing ? 1 : 0)   // a spare row to grow into
+            // In edit mode, fill the viewport with empty grid cells (plus a few
+            // spare rows) so you can resize/drag into real empty space instead
+            // of growing over the existing tiles.
+            let viewportRows = max(1, Int((geo.size.height + spacing) / (cell + spacing)))
+            let gridRows = store.editing
+                ? max(packed.rows + 2, viewportRows)
+                : packed.rows
             ScrollView {
                 ZStack(alignment: .topLeading) {
                     if store.editing {
@@ -94,17 +100,17 @@ struct DeckView: View {
     private func tile(for slot: GridSlot, cell: CGFloat, step: CGFloat, cols: Int) -> some View {
         switch slot.kind {
         case .widget(let w):
+            let mn = widgetMinSpan(w)
             WidgetTile(widget: widgetBinding(w.id), editing: store.editing,
-                       cell: cell, step: step, maxCols: cols, onDelete: { removeWidget(w) })
+                       cell: cell, step: step, maxCols: cols,
+                       minW: min(mn.w, cols), minH: mn.h, onDelete: { removeWidget(w) })
+                .modifier(DraggableItem(id: w.id, editing: store.editing,
+                                        draggingID: $draggingID, reorder: reorder))
         case .button(let btn):
             DeckButtonView(button: binding(for: btn), editing: store.editing,
                            onDelete: { delete(btn) })
-                .onDrag {
-                    draggingID = btn.id
-                    return NSItemProvider(object: btn.id.uuidString as NSString)
-                }
-                .onDrop(of: [UTType.text], delegate: DeckReorderDelegate(
-                    item: btn.id, buttons: buttonsBinding, draggingID: $draggingID))
+                .modifier(DraggableItem(id: btn.id, editing: store.editing,
+                                        draggingID: $draggingID, reorder: reorder))
         case .addButton:
             Button { store.layout.pages[pageIndex].buttons.append(DeckButton()) } label: {
                 addTile(symbol: "plus", label: nil)
@@ -129,15 +135,17 @@ struct DeckView: View {
     }
 
     @ViewBuilder private var addWidgetMenu: some View {
-        Button("Clock") { addWidget(kind: "clock", w: 2, h: 1) }
-        Button("Volume") { addWidget(kind: "volume", w: 1, h: 2) }
-        Button("Media controls") { addWidget(kind: "media", w: 2, h: 1) }
-        Button("Claude usage") { addWidget(kind: "claude", w: 2, h: 2) }
+        Button("Clock") { addWidget(kind: "clock") }
+        Button("Volume") { addWidget(kind: "volume") }
+        Button("Media controls") { addWidget(kind: "media") }
+        Button("Claude usage") { addWidget(kind: "claude") }
+        Button("Battery") { addWidget(kind: "battery") }
+        Button("CPU load") { addWidget(kind: "cpu") }
         let exts = WidgetRegistry.shared.manifests
         if !exts.isEmpty {
             Divider()
             ForEach(exts) { m in
-                Button(m.name) { addWidget(kind: "ext:\(m.id)", w: 2, h: 2) }
+                Button(m.name) { addWidget(kind: "ext:\(m.id)") }
             }
         }
         Divider()
@@ -145,9 +153,11 @@ struct DeckView: View {
         Button("Reload Extensions") { WidgetRegistry.shared.reload() }
     }
 
-    private func addWidget(kind: String, w: Int, h: Int) {
+    private func addWidget(kind: String) {
+        let span = widgetDefaultSpan(kind)
+        let cols = max(2, store.layout.columns)
         store.layout.pages[pageIndex].widgets.append(
-            DeckWidget(kind: kind, spanW: w, spanH: h))
+            DeckWidget(kind: kind, spanW: min(span.w, cols), spanH: span.h))
     }
     private func removeWidget(_ w: DeckWidget) {
         store.layout.pages[pageIndex].widgets.removeAll { $0.id == w.id }
@@ -176,8 +186,8 @@ struct DeckView: View {
         }
     }
 
-    /// Place widgets (in order) then buttons into a `columns`-wide grid, each at
-    /// the first free spot top-to-bottom, left-to-right. Returns slots + row count.
+    /// Place items in the page's unified order into a `columns`-wide grid, each
+    /// at the first free spot (top-to-bottom, left-to-right). Returns slots + rows.
     private func packLayout(columns: Int) -> (slots: [GridSlot], rows: Int) {
         var occupied = Set<Int>()                       // key = row*columns + col
         func isFree(_ r: Int, _ c: Int, _ w: Int, _ h: Int) -> Bool {
@@ -201,16 +211,19 @@ struct DeckView: View {
         }
         var slots: [GridSlot] = []
         let page = store.layout.pages[pageIndex]
-        for wdg in page.widgets {
-            let w = min(max(1, wdg.spanW), columns), h = max(1, wdg.spanH)
-            let (r, c) = place(w, h)
-            slots.append(GridSlot(id: wdg.id.uuidString, col: c, row: r, w: w, h: h,
-                                  kind: .widget(wdg)))
-        }
-        for btn in page.buttons {
-            let (r, c) = place(1, 1)
-            slots.append(GridSlot(id: btn.id.uuidString, col: c, row: r, w: 1, h: 1,
-                                  kind: .button(btn)))
+        let wById = Dictionary(page.widgets.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let bById = Dictionary(page.buttons.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for id in page.resolvedOrder {
+            if let wdg = wById[id] {
+                let w = min(max(1, wdg.spanW), columns), h = max(1, wdg.spanH)
+                let (r, c) = place(w, h)
+                slots.append(GridSlot(id: id.uuidString, col: c, row: r, w: w, h: h,
+                                      kind: .widget(wdg)))
+            } else if let btn = bById[id] {
+                let (r, c) = place(1, 1)
+                slots.append(GridSlot(id: id.uuidString, col: c, row: r, w: 1, h: 1,
+                                      kind: .button(btn)))
+            }
         }
         if store.editing {
             let (r1, c1) = place(1, 1)
@@ -294,9 +307,15 @@ struct DeckView: View {
         .frame(height: 30)
     }
 
-    private var buttonsBinding: Binding<[DeckButton]> {
-        Binding(get: { store.layout.pages[pageIndex].buttons },
-                set: { store.layout.pages[pageIndex].buttons = $0 })
+    /// Move one item before/after another in the page's unified order (buttons
+    /// and widgets together). The packer re-flows from the new order.
+    private func reorder(_ dragId: UUID, _ targetId: UUID) {
+        guard dragId != targetId else { return }
+        var ids = store.layout.pages[pageIndex].resolvedOrder
+        guard let from = ids.firstIndex(of: dragId),
+              let to = ids.firstIndex(of: targetId) else { return }
+        ids.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        store.layout.pages[pageIndex].order = ids
     }
 
     private func binding(for btn: DeckButton) -> Binding<DeckButton> {
@@ -371,21 +390,40 @@ private struct PageChip: View {
     }
 }
 
-// MARK: - drag-to-reorder
+// MARK: - drag-to-reorder (unified: buttons + widgets share one order)
 
-private struct DeckReorderDelegate: DropDelegate {
-    let item: UUID
-    @Binding var buttons: [DeckButton]
+/// Makes any tile draggable in edit mode. On drop-enter it asks the parent to
+/// reorder the dragged id relative to this tile's id.
+private struct DraggableItem: ViewModifier {
+    let id: UUID
+    let editing: Bool
     @Binding var draggingID: UUID?
+    let reorder: (UUID, UUID) -> Void
+
+    func body(content: Content) -> some View {
+        if editing {
+            content
+                .onDrag {
+                    draggingID = id
+                    return NSItemProvider(object: id.uuidString as NSString)
+                }
+                .onDrop(of: [UTType.text],
+                        delegate: ItemDrop(target: id, draggingID: $draggingID,
+                                           reorder: reorder))
+        } else {
+            content
+        }
+    }
+}
+
+private struct ItemDrop: DropDelegate {
+    let target: UUID
+    @Binding var draggingID: UUID?
+    let reorder: (UUID, UUID) -> Void
 
     func dropEntered(info: DropInfo) {
-        guard let dragging = draggingID, dragging != item,
-              let from = buttons.firstIndex(where: { $0.id == dragging }),
-              let to = buttons.firstIndex(where: { $0.id == item }) else { return }
-        withAnimation(.easeInOut(duration: 0.15)) {
-            buttons.move(fromOffsets: IndexSet(integer: from),
-                         toOffset: to > from ? to + 1 : to)
-        }
+        guard let d = draggingID, d != target else { return }
+        withAnimation(.easeInOut(duration: 0.15)) { reorder(d, target) }
     }
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
     func performDrop(info: DropInfo) -> Bool { draggingID = nil; return true }

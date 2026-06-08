@@ -1007,3 +1007,20 @@ because interior panel drags post real mouse drags.
 The Claude usage widget reads its display mode + token limits from
 `widget.config` (`display` = tokens|percent|both, `limit5h`, `limitWeek`);
 percent requires a limit since local logs can't know the plan cap.
+
+## Deck: drag-reorder, min size, more built-in widgets
+
+- **Unified order**: `DeckPage.order` is one sequence over buttons + widgets
+  (`resolvedOrder` falls back to widgets-then-buttons for old layouts). The
+  packer iterates it, so dragging any tile (the `DraggableItem` modifier +
+  `ItemDrop` delegate) reorders both kinds together. Earlier tiles never move
+  when a later one resizes (order-stable); full free placement is task #44.
+- **Min size**: `widgetMinSpan` / `widgetDefaultSpan` give each kind a floor and
+  a drop size; extensions declare `minW/minH/defaultW/defaultH` in the manifest.
+  The resize handle clamps to the minimum.
+- **Edit grid**: in edit mode the grid fills the viewport with dashed cell
+  guides (plus spare rows) so there's visible empty space to resize/drag into.
+- **Built-in widgets**: clock, volume, media, claude, **battery** (`pmset`),
+  **cpu** (`host_statistics`). Media now uses real NX media keys, not F-keys.
+  Most other widgets (OBS, Spotify, timers, multi-tz, GPU…) are intended as
+  registry extensions, not built-ins — see docs/WIDGET_IDEAS.md.

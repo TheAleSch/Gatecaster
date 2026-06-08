@@ -46,6 +46,7 @@ calibration all live there.
 | [docs/DECK_PLAN.md](docs/DECK_PLAN.md) | Deck (Stream Deck-style) plan & research |
 | [docs/EXTENSIONS.md](docs/EXTENSIONS.md) | Writing widget extensions (no Swift) |
 | [docs/EXTENSION_BUILDING.md](docs/EXTENSION_BUILDING.md) | Widget tutorial (publishable walkthrough) |
+| [docs/WIDGET_IDEAS.md](docs/WIDGET_IDEAS.md) | Widget/extension ideas & built-in vs extension split |
 
 ## License
 

@@ -13,6 +13,7 @@ enum DeckActionKind: String, Codable, CaseIterable, Identifiable {
     case shortcut   // run an Apple Shortcut by name
     case shell      // run a shell command (zsh)
     case volume     // set output volume to a fixed percent
+    case media      // media key: play/pause, next, previous
 
     var id: String { rawValue }
     var label: String {
@@ -24,6 +25,7 @@ enum DeckActionKind: String, Codable, CaseIterable, Identifiable {
         case .shortcut: return "Apple Shortcut"
         case .shell: return "Shell Command"
         case .volume: return "Set Volume"
+        case .media: return "Media Key"
         }
     }
     var hint: String {
@@ -35,6 +37,7 @@ enum DeckActionKind: String, Codable, CaseIterable, Identifiable {
         case .shortcut: return "Exact name of a Shortcut from the Shortcuts app."
         case .shell: return "Runs in zsh, e.g. open ~/Downloads"
         case .volume: return "0–100"
+        case .media: return "playpause, next, or previous"
         }
     }
 }
@@ -57,6 +60,20 @@ struct DeckPage: Codable, Identifiable, Hashable {
     var name = "Page"
     var buttons: [DeckButton] = []
     var widgets: [DeckWidget] = []      // wider live tiles (clock/media/extensions)
+    var order: [UUID] = []              // unified pack + drag order across both
+
+    /// Pack/drag order across widgets and buttons. Falls back to
+    /// widgets-then-buttons for layouts saved before `order` existed, and keeps
+    /// itself in sync as items are added/removed.
+    var resolvedOrder: [UUID] {
+        let all = widgets.map(\.id) + buttons.map(\.id)
+        guard !order.isEmpty else { return all }
+        let live = Set(all)
+        var result = order.filter { live.contains($0) }
+        let have = Set(result)
+        for id in all where !have.contains(id) { result.append(id) }   // new items → end
+        return result
+    }
 }
 
 struct DeckLayout: Codable {
@@ -164,7 +181,29 @@ enum DeckRunner {
         case .volume:
             let v = max(0, min(100, Int(a.value) ?? 50))
             runProcess("/usr/bin/osascript", ["-e", "set volume output volume \(v)"])
+        case .media:
+            switch a.value.lowercased() {
+            case "next", "forward":      mediaKey(17)
+            case "previous", "prev", "back", "backward": mediaKey(18)
+            default:                     mediaKey(16)   // play/pause
+            }
         }
+    }
+
+    /// Media keys are NX system-defined events (subtype 8), NOT F-keys — that's
+    /// why sending "fn+f8" did nothing. Codes: 16 play/pause, 17 next, 18 prev.
+    static func mediaKey(_ code: Int32) {
+        func post(_ down: Bool) {
+            let flags = NSEvent.ModifierFlags(rawValue: down ? 0xA00 : 0xB00)
+            let data1 = (Int(code) << 16) | (down ? 0xA00 : 0xB00)
+            if let ev = NSEvent.otherEvent(
+                with: .systemDefined, location: .zero, modifierFlags: flags,
+                timestamp: 0, windowNumber: 0, context: nil,
+                subtype: 8, data1: data1, data2: -1) {
+                ev.cgEvent?.post(tap: .cghidEventTap)
+            }
+        }
+        post(true); post(false)
     }
 
     static func setVolume(_ percent: Int) {
@@ -208,6 +247,7 @@ enum DeckRunner {
         "7": 26, "-": 27, "8": 28, "0": 29, "]": 30, "o": 31, "u": 32, "[": 33,
         "i": 34, "p": 35, "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42,
         ",": 43, "/": 44, "n": 45, "m": 46, ".": 47, "`": 50,
+        "backslash": 42, "slash": 44, "comma": 43, "period": 47,
         "return": 36, "enter": 36, "tab": 48, "space": 49, "delete": 51,
         "backspace": 51, "esc": 53, "escape": 53,
         "f1": 122, "f2": 120, "f3": 99, "f4": 118, "f5": 96, "f6": 97,
