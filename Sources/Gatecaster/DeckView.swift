@@ -36,6 +36,9 @@ struct DeckView: View {
         VStack(spacing: 6) {
             header
             pageBar
+            if !store.layout.pages[pageIndex].widgets.isEmpty || store.editing {
+                widgetRail
+            }
             HStack(alignment: .top, spacing: 10) {
                 grid
                 if store.layout.showVolumeSlider { volumeSlider }
@@ -43,7 +46,62 @@ struct DeckView: View {
             .padding(.horizontal, 8).padding(.bottom, 8)
         }
         .padding(.top, 4)
-        .gcGlass(cornerRadius: 16, fallbackOpacity: settings.keyboardOpacity)
+        .gcActiveBlur(cornerRadius: 16, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
+    }
+
+    // MARK: widget rail (live tiles: clock / media / installed extensions)
+
+    private var widgetRail: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(store.layout.pages[pageIndex].widgets) { w in
+                    WidgetTile(widget: w, cell: 64,
+                               editing: store.editing,
+                               onDelete: { removeWidget(w) })
+                }
+                if store.editing { addWidgetButton }
+            }
+            .padding(.horizontal, 8)
+            .frame(minHeight: 64 * 2 + 8)
+        }
+    }
+
+    private var addWidgetButton: some View {
+        Menu {
+            Button("Clock") { addWidget(kind: "clock", w: 3, h: 2) }
+            Button("Media controls") { addWidget(kind: "media", w: 3, h: 2) }
+            let exts = WidgetRegistry.shared.manifests
+            if !exts.isEmpty {
+                Divider()
+                ForEach(exts) { m in
+                    Button(m.name) { addWidget(kind: "ext:\(m.id)", w: 2, h: 2) }
+                }
+            }
+            Divider()
+            Button("Open Extensions Folder…") {
+                NSWorkspace.shared.open(WidgetRegistry.folder)
+            }
+            Button("Reload Extensions") { WidgetRegistry.shared.reload() }
+        } label: {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.secondary.opacity(0.4),
+                              style: StrokeStyle(lineWidth: 2, dash: [6]))
+                .overlay(VStack(spacing: 2) {
+                    Image(systemName: "puzzlepiece.extension")
+                        .font(.system(size: 18, weight: .semibold))
+                    Text("Widget").font(.system(size: 10))
+                }.foregroundColor(.secondary))
+                .frame(width: 64 * 2, height: 64 * 2)
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden)
+    }
+
+    private func addWidget(kind: String, w: Int, h: Int) {
+        store.layout.pages[pageIndex].widgets.append(
+            DeckWidget(kind: kind, spanW: w, spanH: h))
+    }
+    private func removeWidget(_ w: DeckWidget) {
+        store.layout.pages[pageIndex].widgets.removeAll { $0.id == w.id }
     }
 
     // MARK: chrome (matches keyboard/trackpad panels; top bar = engine drag zone)

@@ -176,7 +176,7 @@ struct KeyboardTabView: View {
             }
             .font(.system(size: 21, weight: .bold))
             .frame(width: 220, height: 52)
-            .gcGlassCapsule(fallbackOpacity: 0.9)
+            .gcActiveBlur(cornerRadius: 26)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -308,7 +308,7 @@ struct KeyboardView: View {
             }
         }
         .padding(8)
-        .gcGlass(cornerRadius: 16, fallbackOpacity: settings.keyboardOpacity)
+        .gcActiveBlur(cornerRadius: 16, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
     }
 
     private var layoutRows: [[KeyDef]] { KeyboardLayouts.rows(for: settings.keyboardLayout) }
@@ -330,6 +330,9 @@ struct KeyboardView: View {
     }
 
     private func keyView(_ k: KeyDef, width: CGFloat) -> some View {
+        // iOS-style press feedback: highlight + dip on touch-down, and a
+        // magnified key-pop callout above letter keys (so the finger doesn't
+        // hide what was typed). Toggle via Settings → Keyboard.
         Button { press(k) } label: {
             Text(display(k))
                 .font(.system(size: 16))
@@ -339,7 +342,9 @@ struct KeyboardView: View {
                 .background(keyShape(special: isSpecial(k), active: isActive(k)))
                 .foregroundColor(isActive(k) ? Color.white : .primary)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(KeyCapStyle(feedback: settings.keyPressFeedback,
+                                 popLabel: settings.keyPopup && isLetter(k.label)
+                                     ? display(k) : nil))
     }
 
     private func fnKey(_ label: String, _ code: CGKeyCode) -> some View {
@@ -350,7 +355,7 @@ struct KeyboardView: View {
                 .background(keyShape(special: true, active: false))
                 .foregroundColor(.primary)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(KeyCapStyle(feedback: settings.keyPressFeedback, popLabel: nil))
     }
 
     // MARK: behavior
@@ -409,5 +414,48 @@ struct KeyboardView: View {
             .fill(active ? Color.accentColor
                          : Color(nsColor: .controlColor).opacity(special ? 0.55 : 1.0))
             .shadow(color: .black.opacity(0.15), radius: 0.5, y: 1)
+    }
+}
+
+/// iOS-style key press feedback. On touch-down: a brightness highlight + a
+/// slight dip (scale 0.94), springing back on release. For letter keys, an
+/// optional magnified key-pop callout floats just above the key while held,
+/// so the keycap stays visible under the fingertip.
+struct KeyCapStyle: ButtonStyle {
+    var feedback: Bool
+    var popLabel: String?
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
+        return configuration.label
+            .scaleEffect(feedback && pressed ? 0.94 : 1.0)
+            .brightness(feedback && pressed ? 0.12 : 0.0)
+            .overlay(alignment: .top) {
+                if let popLabel, pressed {
+                    KeyPopCallout(text: popLabel)
+                        .offset(y: -46)
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.spring(response: 0.18, dampingFraction: 0.6), value: pressed)
+            .zIndex(pressed ? 1 : 0)   // pop draws above neighbours
+    }
+}
+
+/// The magnified keycap bubble shown above a held letter key.
+private struct KeyPopCallout: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.system(size: 26, weight: .regular))
+            .foregroundColor(.primary)
+            .frame(width: 44, height: 52)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .shadow(color: .black.opacity(0.25), radius: 4, y: 2))
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
     }
 }

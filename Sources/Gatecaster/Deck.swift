@@ -56,6 +56,7 @@ struct DeckPage: Codable, Identifiable, Hashable {
     var id = UUID()
     var name = "Page"
     var buttons: [DeckButton] = []
+    var widgets: [DeckWidget] = []      // wider live tiles (clock/media/extensions)
 }
 
 struct DeckLayout: Codable {

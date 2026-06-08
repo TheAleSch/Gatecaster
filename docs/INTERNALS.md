@@ -892,3 +892,72 @@ Two heuristics (Settings → Pointer & Scroll → Palm rejection):
    are a resting hand and are rejected. The guard only catches touches that
    land *after* the panel touch, since landing order is the only signal
    available without contact area.
+
+## Floating panels: run-loop, focus, and backdrop
+
+All touch panels (keyboard, trackpad, deck, floating launcher) are
+non-activating `NSPanel`s — they must never steal key focus from the app the
+user is typing into. Three consequences, each handled:
+
+- **Run-loop modes**: the HID manager and the engine's 120 Hz tick are
+  scheduled in `.commonModes`, not `.defaultMode`. Otherwise opening the
+  status menu or dragging a window (which switch the main run loop out of
+  default mode) freezes touch until the interaction ends.
+- **Live backdrop**: a non-activating window is treated as permanently
+  inactive, so a glass/blur backdrop freezes a stale snapshot. `GlassHostingView`
+  walks its subviews after every layout pass and forces any
+  `NSVisualEffectView` to `state = .active`. On macOS 26, Liquid Glass
+  (`glassEffect`) froze a ghost snapshot with no public override, so panels
+  use `gcActiveBlur` (an always-active `NSVisualEffectView` + sheen) instead.
+  Settings → General → "Blur panel backgrounds" turns this off for a flat
+  translucent fill (no compositing cost).
+- **Single instance**: on launch the app terminates any other running
+  instance with the same bundle id — two engines fighting over one HID device
+  put the cursor on the wrong display and double-post events.
+
+## On-screen keyboard press feedback
+
+iOS-style feedback in `KeyCapStyle` (a `ButtonStyle`): touch-down applies a
+brightness highlight + a 0.94 scale dip, spring-released. Letter keys also get
+a magnified key-pop callout (`KeyPopCallout`) floating above the held key.
+Both toggle independently in Settings → Keyboard (`keyPressFeedback`,
+`keyPopup`).
+
+## General settings tab
+
+Settings → General gathers: start-at-login (`SMAppService`), a live permission
+checklist (Accessibility + Input Monitoring, polled every 2 s, with Grant /
+Open-Settings deep-links / Relaunch), the blur toggle, and touch-controller
+status with a Reconnect button.
+
+## Touch routing inside our own panels
+
+Panels speak "mouse" to the OS so standard SwiftUI controls and third-party
+widgets work without a bespoke API. Two fixes encode this:
+
+- **Interior drag = real mouse drag.** A one-finger drag that starts over one
+  of our panels but NOT on its top bar used to fall through to iPad-scroll, so
+  the deck volume slider (and scroll views) didn't respond to dragging. The
+  engine now posts `leftDown`+`leftDrag` for interior panel drags, so SwiftUI
+  controls track the finger. (Top-bar drags still use the `onPanelDragBegan`
+  window-frame path; synthetic mouse there caused the input wedge.)
+- **Tap holds briefly.** A touch tap fired `leftDown`+`leftUp` in one frame, so
+  a SwiftUI `ButtonStyle`'s pressed state lasted ~0 frames — key highlight/pop
+  only showed under a real mouse. Taps over our panels now hold the button down
+  ~80 ms (async `leftUp`) so press feedback renders.
+
+Only window-frame *moves* use the custom panel-drag callback; everything inside
+a panel is standard SwiftUI driven by synthetic mouse events. This is also the
+cross-platform seam (see DECK_PLAN.md): a Windows host swaps event synthesis,
+the widgets/extensions stay unchanged.
+
+## Deck widgets & extensions
+
+`DeckPage.widgets` holds spanning live tiles rendered in a horizontal rail
+above the button grid. Built-ins: Clock, Media. Third-party widgets are
+declarative `manifest.json` packs under
+`~/Library/Application Support/Gatecaster/Extensions/` — `WidgetRegistry`
+discovers them, `WidgetDataSource` polls each one's `refresh` command (JSON
+stdout → fields), `ExtensionWidget` renders generically, `MissingWidget`
+badges an uninstalled reference. No third-party native code runs; only the
+declared actions + refresh command. Full author guide: docs/EXTENSIONS.md.

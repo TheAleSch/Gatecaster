@@ -106,9 +106,12 @@ final class AppSettings: ObservableObject {
     @Published var keyboardExtendedKeys = true // esc/F1–F12 row + ⌘⌥⌃fn modifier keys
     @Published var keyboardLayout = "us"       // us / fr / es / pt / zh / ja (keycap labels)
     @Published var keyboardNumpad = false      // numeric keypad column
+    @Published var keyPressFeedback = true     // iOS-style highlight + dip on key press
+    @Published var keyPopup = true             // magnified key-pop callout above letter keys
     @Published var showFloatingControl = false // draggable touch launcher panel
     @Published var showTrackpad = false        // virtual trackpad panel
     @Published var showDeck = false            // Stream Deck-style control surface (v3 PoC)
+    @Published var panelBlur = true            // live glass blur behind panels; off = flat translucent (cheaper)
     @Published var trackpadGain = 1.5          // virtual trackpad cursor sensitivity
 
     // MARK: calibration — raw panel coords that map to the screen edges
@@ -159,6 +162,9 @@ final class AppSettings: ObservableObject {
         var palmPanelGuard: Bool?
         var palmClusterPts: Double?
         var showDeck: Bool?
+        var panelBlur: Bool?
+        var keyPressFeedback: Bool?
+        var keyPopup: Bool?
     }
 
     static let url = FileManager.default.homeDirectoryForCurrentUser
@@ -197,7 +203,9 @@ final class AppSettings: ObservableObject {
                  showFloatingControl: showFloatingControl,
                  showTrackpad: showTrackpad, trackpadGain: trackpadGain,
                  palmRejection: palmRejection, palmPanelGuard: palmPanelGuard,
-                 palmClusterPts: palmClusterPts, showDeck: showDeck)
+                 palmClusterPts: palmClusterPts, showDeck: showDeck,
+                 panelBlur: panelBlur, keyPressFeedback: keyPressFeedback,
+                 keyPopup: keyPopup)
     }
 
     private func apply(_ s: Snapshot) {
@@ -235,6 +243,9 @@ final class AppSettings: ObservableObject {
         palmPanelGuard = s.palmPanelGuard ?? true
         palmClusterPts = s.palmClusterPts ?? 56
         showDeck = s.showDeck ?? false
+        panelBlur = s.panelBlur ?? true
+        keyPressFeedback = s.keyPressFeedback ?? true
+        keyPopup = s.keyPopup ?? true
     }
 
     func save() {
@@ -269,5 +280,6 @@ final class AppSettings: ObservableObject {
         keyboardExtendedKeys: true, keyboardLayout: "us", keyboardNumpad: false,
         showFloatingControl: false, showTrackpad: false, trackpadGain: 1.5,
         palmRejection: true, palmPanelGuard: true, palmClusterPts: 56,
-        showDeck: false)
+        showDeck: false, panelBlur: true,
+        keyPressFeedback: true, keyPopup: true)
 }

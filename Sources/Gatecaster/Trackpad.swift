@@ -110,6 +110,8 @@ struct TrackpadView: View {
             }
         }
         .padding(8)
-        .gcGlass(cornerRadius: 16, fallbackOpacity: settings.keyboardOpacity)
+        // Always-live blur: Liquid Glass froze a stale snapshot when these
+        // never-key panels lost focus (macOS 26), so all panels use this.
+        .gcActiveBlur(cornerRadius: 16, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
     }
 }

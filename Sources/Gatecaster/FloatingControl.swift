@@ -34,7 +34,7 @@ struct FloatingControlView: View {
             }
         }
         .frame(width: 160, height: 160)
-        .gcGlass(cornerRadius: 22, fallbackOpacity: 0.9)
+        .gcActiveBlur(cornerRadius: 22)
     }
 
     private func cycleMode() {
@@ -66,7 +66,7 @@ struct FloatingTabView: View {
             Image(systemName: "chevron.left.2")
                 .font(.system(size: 22, weight: .bold))
                 .frame(width: 48, height: 170)
-                .gcGlass(cornerRadius: 14, fallbackOpacity: 0.9)
+                .gcActiveBlur(cornerRadius: 14)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

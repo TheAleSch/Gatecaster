@@ -13,23 +13,29 @@ window, corner-tap calibration, and fully tunable timing.
 ```
 v17ut-touch/
   Package.swift
+  Resources/               # Info.plist + app icon (bundle assets)
+  scripts/                 # make-app.sh (bundle), release.sh (sign+notarize)
   Sources/
     GestureKit/            # our clean-room trackpad-gesture synth (C)
       include/GestureKit.h
       GestureKit.c         # gk_post_fields + capture dump
-    v17ut/                 # the app (Swift)
-      Hid.swift            # IOHIDManager: open + enable digitizer + read
+    Gatecaster/            # the app (Swift)
+      Hid.swift            # IOHIDManager: open + enable digitizer + read (.commonModes)
       Pointer.swift        # Quartz cursor / click / phase-tagged scroll / warp
-      Engine.swift         # gesture state machine (reads AppSettings live)
+      Engine.swift         # gesture state machine + palm rejection (reads AppSettings live)
       GestureSynth.swift   # config-driven magnify/rotate/swipe synthesis
       Capture.swift        # read-only event-tap learning tool
       AppSettings.swift    # persisted tunables / modes / calibration (source of truth)
-      SettingsView.swift   # touch-friendly SwiftUI settings window
+      SettingsView.swift   # touch-friendly SwiftUI settings (General/Pointer/…)
+      GlassStyle.swift     # GlassHostingView + gcActiveBlur (always-live panel backdrop)
       Calibration.swift    # full-screen corner-tap calibration
       DisplayPicker.swift  # numbered "which screen?" overlay + KeyableWindow
-      Keyboard.swift       # on-screen touch keyboard (non-activating panel)
+      Keyboard.swift       # on-screen touch keyboard + iOS-style key feedback
+      Trackpad.swift       # virtual trackpad panel + edge-zone hints
+      Deck.swift           # deck model + JSON store + action runner (v3 PoC)
+      DeckView.swift       # Stream Deck-style control surface (v3 PoC)
       FloatingControl.swift# draggable touch launcher + collapsed edge tab
-      main.swift           # menu-bar app; hosts settings / picker / calibration / keyboard / launcher
+      main.swift           # menu-bar app; hosts all panels & windows (single-instance)
 ```
 
 ## Requirements
@@ -74,11 +80,17 @@ After granting, relaunch.
 ## Run
 
 ```
-.build/release/v17ut
+.build/release/Gatecaster      # or: open dist/Gatecaster.app
 ```
 
 A 👆 icon appears in the menu bar. Open it and pick which display the
 touchscreen maps to (so the cursor lands on the V17UT, not your main screen).
+
+> Signed builds keep TCC permissions across rebuilds; ad-hoc builds change
+> identity each time and re-prompt. `make-app.sh` auto-selects a Developer ID /
+> Apple Development certificate by hash (override with `SIGN_IDENTITY`). A
+> *revoked* certificate makes macOS flag the app as malware — delete it from
+> Keychain Access.
 
 ## Gestures & defaults
 
@@ -95,8 +107,13 @@ is gone).
 
 Open the 👆 menu → **Settings…** for a touch-friendly window:
 
+- **General:** start-at-login (`SMAppService`), a live **Permissions** checklist
+  (Accessibility + Input Monitoring, with Grant / Open-Settings / Relaunch),
+  **Blur panel backgrounds** toggle (off = flat translucent, cheaper), and
+  touch-controller status + Reconnect.
 - **Pointer & scroll:** one-finger (iPad) scroll *(default on)*, natural scroll,
-  inertia, return-cursor-after-touch, verbose logging.
+  inertia, return-cursor-after-touch, verbose logging, plus **palm rejection**
+  (cluster + typing-guard heuristics, with a palm-size slider).
 - **Gestures:** engine = **Off / Smooth / Legacy**. Smooth = animated pinch &
   rotate via synthesized trackpad events; Legacy = keyboard shortcuts (⌘±, ⌘L/R,
   ⌘[ ]) that work everywhere, no trackpad-event code involved.
@@ -110,8 +127,11 @@ Open the 👆 menu → **Settings…** for a touch-friendly window:
   (Keys / Pad / engine / Settings; collapses to an edge tab) — and a **virtual
   trackpad** panel: relative cursor movement, tap-to-click, two-finger scroll
   with inertia (sensitivity tunable). Keyboard and trackpad are draggable and
-  **resizable** via the corner bean; the keyboard has an optional (default-on)
-  esc/F1–F12 row with sticky ⌘ ⌥ ⌃ fn modifiers.
+  **resizable** via the corner bean (full panels drag from the top bar only);
+  the keyboard has an optional (default-on) esc/F1–F12 row with sticky ⌘ ⌥ ⌃ fn
+  modifiers, plus iOS-style **key press feedback** (highlight + dip) and a
+  **key-pop callout** above letter keys. There's also a **Deck** — a Stream
+  Deck-style control surface (v3 PoC; see DECK_PLAN.md).
 - **Display:** **Choose Touchscreen Display…** shows a big number on each screen
   — tap the number on your touchscreen or press that number key. Then
   **Calibrate Touchscreen…** — tap the four corner targets to map the panel.
@@ -119,10 +139,10 @@ Open the 👆 menu → **Settings…** for a touch-friendly window:
   one- and two-finger inertia, friction, flick thresholds, gesture commit/bias,
   dropout-robustness windows, cursor-return delay), each with an ⓘ explanation.
 
-Settings persist to `~/v17ut-settings.json`; the gesture field recipe lives in
-`~/v17ut-gesture.json` (auto-migrates on version change).
+Settings persist to `~/v17ut-settings.json`; the deck layout lives in
+`~/gatecaster-deck.json` (exportable as a portable `.gatedeck` file).
 
-## Auto-start on login (optional)
+## Auto-start on login
 
-Once it works, add it as a Login Item: System Settings → General → Login Items →
-+ → select the `v17ut` binary (or wrap it in a small .app bundle).
+Settings → General → **Start at login** (uses `SMAppService`; requires the
+`.app` bundle, not the bare binary).

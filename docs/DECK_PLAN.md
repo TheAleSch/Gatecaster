@@ -58,6 +58,12 @@ Goal: feel it on the screen, validate the concept.
 - Volume slider (vertical) as the first non-button control.
 - Import / Export layout as JSON (`.gatedeck`).
 - Persistence: `~/gatecaster-deck.json`, debounced atomic writes.
+- **Widget slots + declarative extension system** (see docs/EXTENSIONS.md):
+  a per-page widget rail holds spanning live tiles. Built-in: Clock, Media
+  controls. Third-party widgets are folders with a `manifest.json`
+  (`~/Library/Application Support/Gatecaster/Extensions/`) — no Swift: a tile
+  with live fields (polled via a refresh command's JSON) + buttons firing the
+  standard action set. Missing extensions badge clearly (never a mystery "?").
 
 ### MVP (validate with real users, 2–4 weeks)
 - Custom image icons (drag a PNG onto a button) + icon pack folder.
@@ -70,10 +76,13 @@ Goal: feel it on the screen, validate the concept.
 - Multi-select + alignment in edit mode.
 
 ### Beta
-- **Plugin API v0**: local JSON manifest + executable hook, building on
-  docs/DEVELOPER_API.md. A plugin contributes action types (e.g. OBS scene
-  switch, Spotify, Home Assistant). Versioned manifest so plugins never hard-
-  break layouts (only badge as missing).
+- **Extension API v1** (builds on the PoC manifest in docs/EXTENSIONS.md):
+  per-OS command maps (`{macos, windows}`) so one extension targets both
+  platforms; versioned manifest schema so packs never hard-break layouts;
+  signed packs. A plugin contributes widgets/actions (OBS, Spotify, Home
+  Assistant) declaratively.
+- **WebView widgets**: sandboxed HTML/JS tiles with a tiny `gatecaster.*` JS
+  bridge for fully custom UI — portable to Windows (WKWebView ↔ WebView2).
 - Knobs: rotary touch control (circular drag) bindable to volume/brightness/
   scroll/plugin values.
 - Pack format: `.gatedeck` bundles layout + icons + plugin references.
@@ -112,7 +121,28 @@ Goal: feel it on the screen, validate the concept.
 
 `kind` ∈ `app | url | keystroke | shortcut | shell | volume | none`.
 Schema carries no version field yet; MVP adds `"schema": 1` before any
-breaking change.
+breaking change. A page also carries `widgets` (see docs/EXTENSIONS.md).
+
+## Cross-platform / Windows portability
+
+The deck is designed so a Windows port reuses everything above the host layer.
+What's portable (OS-neutral data + UI): the deck layout & `.gatedeck` format,
+the widget/extension manifest schema, the marketplace, and the SwiftUI/
+declarative widget rendering model. What's a thin platform layer: HID touch
+reading, event synthesis, and command execution (zsh ↔ PowerShell). Concretely:
+
+- Extensions are **declarative manifests**, not Swift — authors target the data
+  format, not the OS. A future `{macos, windows}` command map lets one
+  extension run on both.
+- Keep all action execution behind one `DeckRunner`-style interface so the
+  Windows port swaps only its implementation.
+- Widgets that need custom UI use the planned **WebView** path (WKWebView ↔
+  WebView2) — same web code both platforms.
+
+The lesson already applied (slider/keyboard fixes): panel interiors speak
+"mouse" to the OS so any standard control — and any third-party widget — works
+without a Gatecaster-specific UI API. Only window-frame moves use the custom
+panel-drag callback (synthetic mouse there caused the input wedge).
 
 ## Sources
 

@@ -249,7 +249,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             panel.backgroundColor = .clear
             panel.ignoresMouseEvents = true       // affordance only — never intercepts
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            let host = NSHostingView(rootView: EdgeHintView(horizontal: horizontal,
+            let host = GlassHostingView(rootView: EdgeHintView(horizontal: horizontal,
                                                             states: edgeStates))
             host.frame = NSRect(origin: .zero, size: rect.size)
             panel.contentView = host
@@ -378,7 +378,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func expandKeyboard() {
         guard let panel = keyboardPanel else { return }
         let view = KeyboardView(settings: settings) { [weak self] in self?.collapseKeyboardToTab() }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         let sf = (nsScreen(for: selectedDisplay) ?? NSScreen.main)?.frame ?? engine.bounds
         // Numpad ADDS width (main keys keep their size): 820 / 0.78 ≈ 1060.
         let w: CGFloat = settings.keyboardNumpad ? 1060 : 820
@@ -392,7 +392,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func collapseKeyboardToTab() {
         guard let panel = keyboardPanel else { return }
         let view = KeyboardTabView { [weak self] in self?.expandKeyboard() }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         let sf = (nsScreen(for: selectedDisplay) ?? NSScreen.main)?.frame ?? engine.bounds
         let rect = NSRect(x: sf.midX - 110, y: sf.minY + 2, width: 220, height: 52)
         host.frame = NSRect(origin: .zero, size: rect.size)
@@ -498,7 +498,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         let view = TrackpadView(settings: settings) { [weak self] in
             self?.settings.showTrackpad = false
         }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         let sf = (nsScreen(for: selectedDisplay) ?? NSScreen.main)?.frame ?? engine.bounds
         let rect = NSRect(x: sf.maxX - 420, y: sf.minY + 80, width: 380, height: 280)
         host.frame = NSRect(origin: .zero, size: rect.size)
@@ -528,7 +528,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         let view = DeckView(store: DeckStore.shared, settings: settings) { [weak self] in
             self?.settings.showDeck = false
         }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         let sf = (nsScreen(for: selectedDisplay) ?? NSScreen.main)?.frame ?? engine.bounds
         let rect = NSRect(x: sf.minX + 60, y: sf.midY - 200, width: 460, height: 420)
         host.frame = NSRect(origin: .zero, size: rect.size)
@@ -555,7 +555,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func collapseTrackpadToTab() {
         guard let panel = trackpadPanel else { return }
         let view = FloatingTabView { [weak self] in self?.expandTrackpad() }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         let sf = floatingScreenFrame()
         let rect = NSRect(x: sf.maxX - 48, y: panel.frame.minY, width: 48, height: 170)
         host.frame = NSRect(origin: .zero, size: rect.size)
@@ -568,7 +568,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         let view = TrackpadView(settings: settings) { [weak self] in
             self?.settings.showTrackpad = false
         }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         let sf = floatingScreenFrame()
         let y = max(sf.minY + 40, min(panel.frame.minY, sf.maxY - 320))
         let rect = NSRect(x: sf.maxX - 420, y: y, width: 380, height: 280)
@@ -595,7 +595,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                                        onTrackpad: { [weak self] in self?.toggleTrackpad() },
                                        onSettings: { [weak self] in self?.openSettings() },
                                        onCollapse: { [weak self] in self?.collapseFloating() })
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         host.frame = NSRect(x: 0, y: 0, width: 160, height: 160)
         let sf = floatingScreenFrame()
         panel.contentView = host
@@ -605,7 +605,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func collapseFloating() {
         guard let panel = floatingPanel else { return }
         let view = FloatingTabView { [weak self] in self?.expandFloating() }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         host.frame = NSRect(x: 0, y: 0, width: 48, height: 170)
         let sf = floatingScreenFrame()
         // pin to the right edge, keeping the current vertical position
@@ -637,7 +637,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             win.level = .screenSaver
             win.isOpaque = false
             win.backgroundColor = .clear
-            win.contentView = NSHostingView(rootView: view)
+            win.contentView = GlassHostingView(rootView: view)
             win.setFrame(screen.frame, display: true)
             win.orderFrontRegardless()
             pickerWindows.append(win)
@@ -697,7 +697,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         win.level = .screenSaver
         win.isOpaque = false
         win.backgroundColor = .clear
-        win.contentView = NSHostingView(rootView: CalibrationView(controller: controller))
+        win.contentView = GlassHostingView(rootView: CalibrationView(controller: controller))
         win.setFrame(frame, display: true)
         calibrationWindow = win
         NSApp.activate(ignoringOtherApps: true)

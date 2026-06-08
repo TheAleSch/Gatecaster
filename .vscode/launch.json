@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:v17ut-touch}",
+            "name": "Debug Gatecaster",
+            "target": "Gatecaster",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Gatecaster"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:v17ut-touch}",
+            "name": "Release Gatecaster",
+            "target": "Gatecaster",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Gatecaster"
+        }
+    ]
+}

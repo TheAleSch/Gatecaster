@@ -137,9 +137,14 @@ final class Engine {
     private var timer: Timer?
 
     func start() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
+        // Added to .common run-loop modes (not just default): the tick must
+        // keep running while menus are open and windows are dragged, or
+        // momentum/lift detection freezes whenever the UI tracks the mouse.
+        let t = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
             self?.tick()
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     deinit { timer?.invalidate() }
@@ -317,6 +322,16 @@ final class Engine {
                 if s.ipadMode && s.inertia && movedTotal > s.tapMaxMove
                     && hypot(rv.0, rv.1) > s.flickFromTap {
                     vel = (rv.0, rv.1); beginMomentum(t, oneFinger: true)   // short flick coast
+                } else if overPanel {
+                    // Tap on one of OUR panels (keyboard/deck): hold the button
+                    // down briefly so SwiftUI press feedback (key highlight, pop)
+                    // actually renders — an instant down+up shows for ~0 frames.
+                    Pointer.leftDown(pLast)
+                    let up = pLast
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                        Pointer.leftUp(up)
+                    }
+                    mode = .idle
                 } else {
                     Pointer.leftDown(pLast); Pointer.leftUp(pLast)     // quick tap = click
                     mode = .idle
@@ -468,6 +483,12 @@ final class Engine {
                 if overPanel, onPanelDragBegan?(pStart) == true {
                     mode = .panelDrag; preTouchPos = nil
                     onPanelDragMoved?(p)
+                } else if overPanel {
+                    // Interior of one of OUR panels (deck slider, scroll views):
+                    // a real mouse drag so SwiftUI controls track the finger —
+                    // NOT iPad-scroll, which would scroll instead of dragging.
+                    mode = .dragging; preTouchPos = nil
+                    Pointer.leftDown(pStart); Pointer.leftDrag(p)
                 } else if s.ipadMode {
                     mode = .fscroll; scrollSign = s.scrollSign
                     sacc = (0, 0); phaseOpen = false
