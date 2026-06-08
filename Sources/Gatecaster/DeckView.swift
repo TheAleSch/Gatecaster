@@ -27,8 +27,6 @@ struct DeckView: View {
     var onHide: () -> Void
 
     @State private var draggingID: UUID?
-    @State private var volume = 50.0
-    @State private var lastVolumeSent = Date.distantPast
 
     private var pageIndex: Int { min(store.currentPage, store.layout.pages.count - 1) }
 
@@ -36,64 +34,115 @@ struct DeckView: View {
         VStack(spacing: 6) {
             header
             pageBar
-            if !store.layout.pages[pageIndex].widgets.isEmpty || store.editing {
-                widgetRail
-            }
-            HStack(alignment: .top, spacing: 10) {
-                grid
-                if store.layout.showVolumeSlider { volumeSlider }
-            }
-            .padding(.horizontal, 8).padding(.bottom, 8)
+            packedGrid
+                .padding(.horizontal, 8).padding(.bottom, 8)
         }
         .padding(.top, 4)
         .gcActiveBlur(cornerRadius: 16, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
     }
 
-    // MARK: widget rail (live tiles: clock / media / installed extensions)
+    // MARK: unified spanning grid — buttons (1×1) and widgets (W×H), first-fit
+    // packed so some tiles use more cells and others fewer, all square-aligned.
 
-    private var widgetRail: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(store.layout.pages[pageIndex].widgets) { w in
-                    WidgetTile(widget: w, cell: 64,
-                               editing: store.editing,
-                               onDelete: { removeWidget(w) })
+    private var packedGrid: some View {
+        let cols = max(2, store.layout.columns)
+        let spacing: CGFloat = 8
+        let packed = packLayout(columns: cols)
+        return GeometryReader { geo in
+            let cell = (geo.size.width - spacing * CGFloat(cols - 1)) / CGFloat(cols)
+            let gridRows = packed.rows + (store.editing ? 1 : 0)   // a spare row to grow into
+            ScrollView {
+                ZStack(alignment: .topLeading) {
+                    if store.editing {
+                        gridGuides(cols: cols, rows: gridRows, cell: cell, spacing: spacing)
+                    }
+                    ForEach(packed.slots) { slot in
+                        tile(for: slot, cell: cell, step: cell + spacing, cols: cols)
+                            .frame(width: cell * CGFloat(slot.w) + spacing * CGFloat(slot.w - 1),
+                                   height: cell * CGFloat(slot.h) + spacing * CGFloat(slot.h - 1))
+                            .offset(x: CGFloat(slot.col) * (cell + spacing),
+                                    y: CGFloat(slot.row) * (cell + spacing))
+                            // Animate position + size so resizing/reflow glides
+                            // instead of teleporting (the packer moves tiles).
+                            .animation(.spring(response: 0.3, dampingFraction: 0.82),
+                                       value: "\(slot.col),\(slot.row),\(slot.w),\(slot.h)")
+                    }
                 }
-                if store.editing { addWidgetButton }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(height: CGFloat(gridRows) * cell
+                       + spacing * CGFloat(max(0, gridRows - 1)))
             }
-            .padding(.horizontal, 8)
-            .frame(minHeight: 64 * 2 + 8)
         }
     }
 
-    private var addWidgetButton: some View {
-        Menu {
-            Button("Clock") { addWidget(kind: "clock", w: 3, h: 2) }
-            Button("Media controls") { addWidget(kind: "media", w: 3, h: 2) }
-            let exts = WidgetRegistry.shared.manifests
-            if !exts.isEmpty {
-                Divider()
-                ForEach(exts) { m in
-                    Button(m.name) { addWidget(kind: "ext:\(m.id)", w: 2, h: 2) }
-                }
+    /// Faint dashed cell outlines shown in edit mode so snapping is visible.
+    private func gridGuides(cols: Int, rows: Int, cell: CGFloat, spacing: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(0..<(cols * max(1, rows)), id: \.self) { idx in
+                let r = idx / cols, c = idx % cols
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.secondary.opacity(0.18),
+                            style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    .frame(width: cell, height: cell)
+                    .offset(x: CGFloat(c) * (cell + spacing),
+                            y: CGFloat(r) * (cell + spacing))
             }
-            Divider()
-            Button("Open Extensions Folder…") {
-                NSWorkspace.shared.open(WidgetRegistry.folder)
-            }
-            Button("Reload Extensions") { WidgetRegistry.shared.reload() }
-        } label: {
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.secondary.opacity(0.4),
-                              style: StrokeStyle(lineWidth: 2, dash: [6]))
-                .overlay(VStack(spacing: 2) {
-                    Image(systemName: "puzzlepiece.extension")
-                        .font(.system(size: 18, weight: .semibold))
-                    Text("Widget").font(.system(size: 10))
-                }.foregroundColor(.secondary))
-                .frame(width: 64 * 2, height: 64 * 2)
         }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden)
+    }
+
+    @ViewBuilder
+    private func tile(for slot: GridSlot, cell: CGFloat, step: CGFloat, cols: Int) -> some View {
+        switch slot.kind {
+        case .widget(let w):
+            WidgetTile(widget: widgetBinding(w.id), editing: store.editing,
+                       cell: cell, step: step, maxCols: cols, onDelete: { removeWidget(w) })
+        case .button(let btn):
+            DeckButtonView(button: binding(for: btn), editing: store.editing,
+                           onDelete: { delete(btn) })
+                .onDrag {
+                    draggingID = btn.id
+                    return NSItemProvider(object: btn.id.uuidString as NSString)
+                }
+                .onDrop(of: [UTType.text], delegate: DeckReorderDelegate(
+                    item: btn.id, buttons: buttonsBinding, draggingID: $draggingID))
+        case .addButton:
+            Button { store.layout.pages[pageIndex].buttons.append(DeckButton()) } label: {
+                addTile(symbol: "plus", label: nil)
+            }
+            .buttonStyle(.plain)
+        case .addWidget:
+            Menu { addWidgetMenu } label: {
+                addTile(symbol: "puzzlepiece.extension", label: "Widget")
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden)
+        }
+    }
+
+    private func addTile(symbol: String, label: String?) -> some View {
+        RoundedRectangle(cornerRadius: 12)
+            .strokeBorder(Color.secondary.opacity(0.4),
+                          style: StrokeStyle(lineWidth: 2, dash: [6]))
+            .overlay(VStack(spacing: 2) {
+                Image(systemName: symbol).font(.system(size: 20, weight: .semibold))
+                if let label { Text(label).font(.system(size: 10)) }
+            }.foregroundColor(.secondary))
+    }
+
+    @ViewBuilder private var addWidgetMenu: some View {
+        Button("Clock") { addWidget(kind: "clock", w: 2, h: 1) }
+        Button("Volume") { addWidget(kind: "volume", w: 1, h: 2) }
+        Button("Media controls") { addWidget(kind: "media", w: 2, h: 1) }
+        Button("Claude usage") { addWidget(kind: "claude", w: 2, h: 2) }
+        let exts = WidgetRegistry.shared.manifests
+        if !exts.isEmpty {
+            Divider()
+            ForEach(exts) { m in
+                Button(m.name) { addWidget(kind: "ext:\(m.id)", w: 2, h: 2) }
+            }
+        }
+        Divider()
+        Button("Open Extensions Folder…") { NSWorkspace.shared.open(WidgetRegistry.folder) }
+        Button("Reload Extensions") { WidgetRegistry.shared.reload() }
     }
 
     private func addWidget(kind: String, w: Int, h: Int) {
@@ -102,6 +151,76 @@ struct DeckView: View {
     }
     private func removeWidget(_ w: DeckWidget) {
         store.layout.pages[pageIndex].widgets.removeAll { $0.id == w.id }
+    }
+
+    private func widgetBinding(_ id: UUID) -> Binding<DeckWidget> {
+        Binding(
+            get: {
+                store.layout.pages[pageIndex].widgets.first { $0.id == id } ?? DeckWidget()
+            },
+            set: { nv in
+                if let i = store.layout.pages[pageIndex].widgets.firstIndex(where: { $0.id == id }) {
+                    store.layout.pages[pageIndex].widgets[i] = nv
+                }
+            })
+    }
+
+    // MARK: first-fit packing
+
+    struct GridSlot: Identifiable {
+        let id: String
+        let col: Int, row: Int, w: Int, h: Int
+        let kind: Kind
+        enum Kind {
+            case widget(DeckWidget), button(DeckButton), addButton, addWidget
+        }
+    }
+
+    /// Place widgets (in order) then buttons into a `columns`-wide grid, each at
+    /// the first free spot top-to-bottom, left-to-right. Returns slots + row count.
+    private func packLayout(columns: Int) -> (slots: [GridSlot], rows: Int) {
+        var occupied = Set<Int>()                       // key = row*columns + col
+        func isFree(_ r: Int, _ c: Int, _ w: Int, _ h: Int) -> Bool {
+            if c + w > columns { return false }
+            for dr in 0..<h { for dc in 0..<w {
+                if occupied.contains((r + dr) * columns + c + dc) { return false }
+            } }
+            return true
+        }
+        func place(_ w: Int, _ h: Int) -> (Int, Int) {
+            var r = 0
+            while true {
+                for c in 0...max(0, columns - w) where isFree(r, c, w, h) {
+                    for dr in 0..<h { for dc in 0..<w {
+                        occupied.insert((r + dr) * columns + c + dc)
+                    } }
+                    return (r, c)
+                }
+                r += 1
+            }
+        }
+        var slots: [GridSlot] = []
+        let page = store.layout.pages[pageIndex]
+        for wdg in page.widgets {
+            let w = min(max(1, wdg.spanW), columns), h = max(1, wdg.spanH)
+            let (r, c) = place(w, h)
+            slots.append(GridSlot(id: wdg.id.uuidString, col: c, row: r, w: w, h: h,
+                                  kind: .widget(wdg)))
+        }
+        for btn in page.buttons {
+            let (r, c) = place(1, 1)
+            slots.append(GridSlot(id: btn.id.uuidString, col: c, row: r, w: 1, h: 1,
+                                  kind: .button(btn)))
+        }
+        if store.editing {
+            let (r1, c1) = place(1, 1)
+            slots.append(GridSlot(id: "add-button", col: c1, row: r1, w: 1, h: 1, kind: .addButton))
+            let (r2, c2) = place(min(2, columns), 1)
+            slots.append(GridSlot(id: "add-widget", col: c2, row: r2, w: min(2, columns), h: 1,
+                                  kind: .addWidget))
+        }
+        let rows = (occupied.map { $0 / columns }.max() ?? -1) + 1
+        return (slots, max(1, rows))
     }
 
     // MARK: chrome (matches keyboard/trackpad panels; top bar = engine drag zone)
@@ -130,6 +249,7 @@ struct DeckView: View {
             .buttonStyle(.plain).foregroundColor(.secondary)
         }
         .padding(.horizontal, 6)
+        .background(TitleBarDrag())   // mouse: drag panel by title bar only
     }
 
     private var settingsMenu: some View {
@@ -149,10 +269,6 @@ struct DeckView: View {
             Divider()
             Button("More Columns") { store.layout.columns = min(8, store.layout.columns + 1) }
             Button("Fewer Columns") { store.layout.columns = max(2, store.layout.columns - 1) }
-            Divider()
-            Button(store.layout.showVolumeSlider ? "Hide Volume Slider" : "Show Volume Slider") {
-                store.layout.showVolumeSlider.toggle()
-            }
         } label: {
             Image(systemName: "ellipsis.circle").font(.system(size: 24))
                 .frame(width: 36, height: 36).contentShape(Rectangle())
@@ -178,45 +294,6 @@ struct DeckView: View {
         .frame(height: 30)
     }
 
-    // MARK: grid
-
-    private var grid: some View {
-        let cols = Array(repeating: GridItem(.flexible(), spacing: 8),
-                         count: max(2, store.layout.columns))
-        return ScrollView {
-            LazyVGrid(columns: cols, spacing: 8) {
-                ForEach(store.layout.pages[pageIndex].buttons) { btn in
-                    DeckButtonView(button: binding(for: btn),
-                                   editing: store.editing,
-                                   onDelete: { delete(btn) })
-                        .onDrag {
-                            draggingID = btn.id
-                            return NSItemProvider(object: btn.id.uuidString as NSString)
-                        }
-                        .onDrop(of: [UTType.text],
-                                delegate: DeckReorderDelegate(
-                                    item: btn.id,
-                                    buttons: buttonsBinding,
-                                    draggingID: $draggingID))
-                }
-                if store.editing {
-                    Button {
-                        store.layout.pages[pageIndex].buttons.append(DeckButton())
-                    } label: {
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(Color.secondary.opacity(0.4),
-                                          style: StrokeStyle(lineWidth: 2, dash: [6]))
-                            .overlay(Image(systemName: "plus")
-                                .font(.system(size: 22, weight: .semibold))
-                                .foregroundColor(.secondary))
-                            .aspectRatio(1, contentMode: .fit)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
     private var buttonsBinding: Binding<[DeckButton]> {
         Binding(get: { store.layout.pages[pageIndex].buttons },
                 set: { store.layout.pages[pageIndex].buttons = $0 })
@@ -236,39 +313,6 @@ struct DeckView: View {
 
     private func delete(_ btn: DeckButton) {
         store.layout.pages[pageIndex].buttons.removeAll { $0.id == btn.id }
-    }
-
-    // MARK: volume slider (first non-button control; knobs come later)
-
-    private var volumeSlider: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "speaker.wave.2.fill")
-                .font(.system(size: 13)).foregroundColor(.secondary)
-            GeometryReader { geo in
-                let h = geo.size.height
-                ZStack(alignment: .bottom) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.secondary.opacity(0.18))
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.accentColor.opacity(0.75))
-                        .frame(height: max(8, h * volume / 100))
-                }
-                .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0)
-                    .onChanged { g in
-                        volume = max(0, min(100, 100 * (1 - g.location.y / h)))
-                        // osascript per event is heavy — throttle to ~10 Hz
-                        if Date().timeIntervalSince(lastVolumeSent) > 0.1 {
-                            lastVolumeSent = Date()
-                            DeckRunner.setVolume(Int(volume))
-                        }
-                    }
-                    .onEnded { _ in DeckRunner.setVolume(Int(volume)) })
-            }
-            Text("\(Int(volume))").font(.system(size: 11).monospacedDigit())
-                .foregroundColor(.secondary)
-        }
-        .frame(width: 44)
     }
 
     // MARK: import / export
@@ -356,10 +400,17 @@ private struct DeckButtonView: View {
     @State private var showEditor = false
     @State private var pressed = false
 
+    // Empty colorHex = neutral keycap (matches the on-screen keyboard); a chosen
+    // color tints the tile and switches the label to white for contrast.
+    private var isNeutral: Bool { button.colorHex.isEmpty }
+
     var body: some View {
         ZStack(alignment: .topTrailing) {
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color(hex: button.colorHex).opacity(pressed ? 0.55 : 0.85))
+                .fill(isNeutral
+                      ? Color(nsColor: .controlColor).opacity(pressed ? 0.6 : 1.0)
+                      : Color(hex: button.colorHex).opacity(pressed ? 0.55 : 0.85))
+                .shadow(color: .black.opacity(0.15), radius: 0.5, y: 1)
             VStack(spacing: 4) {
                 Image(systemName: button.symbol)
                     .font(.system(size: 22, weight: .semibold))
@@ -368,7 +419,7 @@ private struct DeckButtonView: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
             }
-            .foregroundColor(.white)
+            .foregroundColor(isNeutral ? .primary : .white)
             .padding(4)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -448,6 +499,16 @@ private struct DeckButtonEditor: View {
                 .textFieldStyle(.roundedBorder).font(.system(size: 11))
 
             HStack(spacing: 6) {
+                // Neutral (default) — matches the on-screen keyboard keycaps.
+                Circle()
+                    .fill(Color(nsColor: .controlColor))
+                    .frame(width: 22, height: 22)
+                    .overlay(Circle().strokeBorder(Color.primary.opacity(
+                        button.colorHex.isEmpty ? 0.8 : 0.25), lineWidth: 2))
+                    .overlay(Image(systemName: "circle.slash")
+                        .font(.system(size: 9)).foregroundColor(.secondary)
+                        .opacity(button.colorHex.isEmpty ? 0 : 0.6))
+                    .onTapGesture { button.colorHex = "" }
                 ForEach(Self.colors, id: \.self) { hex in
                     Circle()
                         .fill(Color(hex: hex))

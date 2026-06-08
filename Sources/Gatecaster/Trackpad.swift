@@ -26,6 +26,28 @@ struct ResizeHandle: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
+/// Mouse-only window drag, restricted to the title bar. Panels have
+/// `isMovableByWindowBackground = false` (dragging the body moved the window
+/// under sliders), so this view re-enables window dragging just on the header
+/// for mouse users. Touch uses the engine's top-bar panelDrag instead. Place
+/// it as a `.background` of the header; foreground buttons consume their own
+/// clicks, so only empty header areas start a drag.
+struct TitleBarDrag: NSViewRepresentable {
+    final class V: NSView {
+        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+        override var mouseDownCanMoveWindow: Bool { true }
+    }
+    func makeNSView(context: Context) -> NSView { V() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+/// A small visible grip that marks the draggable title bar.
+struct DragHandle: View {
+    var body: some View {
+        Capsule().fill(Color.secondary.opacity(0.5)).frame(width: 40, height: 5)
+    }
+}
+
 /// The visual bean + the resize behavior, for panel header bars.
 struct ResizeBean: View {
     var body: some View {
@@ -97,6 +119,7 @@ struct TrackpadView: View {
                 .buttonStyle(.plain).foregroundColor(.secondary)
             }
             .padding(.horizontal, 6).padding(.top, 4)
+            .background(TitleBarDrag())   // mouse: drag panel by title bar only
 
             ZStack {
                 RoundedRectangle(cornerRadius: 12)

@@ -961,3 +961,49 @@ discovers them, `WidgetDataSource` polls each one's `refresh` command (JSON
 stdout → fields), `ExtensionWidget` renders generically, `MissingWidget`
 badges an uninstalled reference. No third-party native code runs; only the
 declared actions + refresh command. Full author guide: docs/EXTENSIONS.md.
+
+## Panel dragging: title bar only
+
+Panels set `isMovableByWindowBackground = false`. Whole-background drag both
+let a mouse move a panel from anywhere AND made the engine's synthetic
+mouse-drag over a slider move the window instead of the control. Now:
+- **Mouse**: a `TitleBarDrag` NSView sits behind each header and calls
+  `window.performDrag` on mouseDown — only the title bar moves the panel;
+  header buttons consume their own clicks.
+- **Touch**: the engine's top-bar `onPanelDragBegan` path (full panels drag
+  only from the 46pt header) moves the frame; interior touches are real mouse
+  drags for the controls.
+
+## Built-in deck widgets
+
+`clock` (time/date), `media` (transport via media keys), and `claude` —
+Claude usage. The Claude widget (`ClaudeUsage`) scans
+`~/.claude/projects/**/*.jsonl` off-thread every 60s and sums token usage
+(input/output/cache). It mirrors ccusage: de-dups entries by message-id +
+request-id, then groups them into 5-hour **session blocks** (a block starts at
+the first message floored to the UTC hour and ends 5h later or after a >5h
+gap) — so the "5-hour" figure is the active block, not a naive last-5-hours.
+It also reports the rolling 7-day total and the largest historical block,
+which is used as an auto limit (ccusage's "-t max") so the bar shows a
+percentage even without an explicit cap. Optional `limit5h`/`limitWeek` config
+override it; `display` = tokens|percent|both. Percent needs a limit because
+local logs can't know the plan cap. Purely local; no network. For maximum
+fidelity a future option could shell out to `ccusage --json` when installed.
+
+## Deck layout: unified spanning grid + per-widget editing
+
+Buttons (1×1) and widgets (W×H) share one grid. `DeckView.packLayout` is a
+first-fit packer: it places each widget then each button at the first free
+slot (top-to-bottom, left-to-right) in a `columns`-wide grid, returning
+absolute (row,col) positions rendered in a `ZStack` with offsets. Buttons
+default to the neutral keycap color (empty `colorHex`); color is opt-in.
+
+In edit mode each widget tile shows three controls: a **gear**
+(`WidgetConfigEditor` popover — per-kind settings), a **trash** (delete), and
+a bottom-right **resize handle** that drags the span in whole cells
+(`widget.spanW/spanH`, via a `Binding<DeckWidget>`). Resize works on touch
+because interior panel drags post real mouse drags.
+
+The Claude usage widget reads its display mode + token limits from
+`widget.config` (`display` = tokens|percent|both, `limit5h`, `limitWeek`);
+percent requires a limit since local logs can't know the plan cap.

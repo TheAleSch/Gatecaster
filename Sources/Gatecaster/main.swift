@@ -367,7 +367,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         panel.hidesOnDeactivate = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.isMovableByWindowBackground = true     // drag the keyboard by its top bar / gaps
+        panel.isMovableByWindowBackground = false    // title-bar handle only (see TitleBarDrag); bg-drag moved the panel under sliders
         // Show over the active Space and over full-screen apps, even though we're accessory.
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         keyboardPanel = panel
@@ -510,7 +510,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         panel.hidesOnDeactivate = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false   // title-bar handle only (see TitleBarDrag)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = host
         panel.setFrame(rect, display: true)
@@ -540,7 +540,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         panel.hidesOnDeactivate = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false   // title-bar handle only (see TitleBarDrag)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = host
         panel.setFrame(rect, display: true)

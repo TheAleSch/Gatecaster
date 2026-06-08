@@ -48,7 +48,7 @@ struct DeckButton: Codable, Identifiable, Hashable {
     var id = UUID()
     var title = "Button"
     var symbol = "square.grid.2x2"   // SF Symbol name
-    var colorHex = "#3478F6"
+    var colorHex = ""                // empty = neutral keycap (matches keyboard)
     var action = DeckAction()
 }
 
@@ -120,25 +120,25 @@ final class DeckStore: ObservableObject {
 
     // Starter deck so the first open isn't an empty void.
     private static let starter = DeckLayout(
-        columns: 4, showVolumeSlider: true,
+        columns: 4, showVolumeSlider: false,
         pages: [DeckPage(name: "Main", buttons: [
-            DeckButton(title: "Safari", symbol: "safari", colorHex: "#3478F6",
+            DeckButton(title: "Safari", symbol: "safari",
                        action: DeckAction(kind: .app, value: "Safari")),
-            DeckButton(title: "Mail", symbol: "envelope.fill", colorHex: "#30B0C7",
+            DeckButton(title: "Mail", symbol: "envelope.fill",
                        action: DeckAction(kind: .app, value: "Mail")),
-            DeckButton(title: "Screenshot", symbol: "camera.viewfinder", colorHex: "#FF9F0A",
+            DeckButton(title: "Screenshot", symbol: "camera.viewfinder",
                        action: DeckAction(kind: .keystroke, value: "cmd+shift+4")),
-            DeckButton(title: "Mission\nControl", symbol: "rectangle.3.group", colorHex: "#AF52DE",
+            DeckButton(title: "Mission\nControl", symbol: "rectangle.3.group",
                        action: DeckAction(kind: .keystroke, value: "ctrl+up")),
-            DeckButton(title: "Lock", symbol: "lock.fill", colorHex: "#FF453A",
+            DeckButton(title: "Lock", symbol: "lock.fill",
                        action: DeckAction(kind: .keystroke, value: "cmd+ctrl+q")),
-            DeckButton(title: "Mute", symbol: "speaker.slash.fill", colorHex: "#8E8E93",
-                       action: DeckAction(kind: .volume, value: "0")),
             DeckButton(title: "GitHub", symbol: "chevron.left.forwardslash.chevron.right",
-                       colorHex: "#32D74B",
                        action: DeckAction(kind: .url, value: "https://github.com")),
-            DeckButton(title: "Downloads", symbol: "folder.fill", colorHex: "#FFD60A",
+            DeckButton(title: "Downloads", symbol: "folder.fill",
                        action: DeckAction(kind: .shell, value: "open ~/Downloads")),
+        ], widgets: [
+            DeckWidget(kind: "clock", spanW: 2, spanH: 1),
+            DeckWidget(kind: "volume", spanW: 1, spanH: 2),
         ])])
 }
 

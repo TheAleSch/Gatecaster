@@ -282,6 +282,7 @@ struct KeyboardView: View {
                 .buttonStyle(.plain).foregroundColor(.secondary)
             }
             .padding(.horizontal, 6).padding(.top, 4)
+            .background(TitleBarDrag())   // mouse: drag panel by title bar only
 
             if settings.keyboardExtendedKeys {
                 HStack(spacing: 4) {

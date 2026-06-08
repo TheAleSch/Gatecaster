@@ -128,43 +128,111 @@ final class WidgetDataSource: ObservableObject {
 
 // MARK: - widget tile views
 
-/// Renders one widget at spanW×spanH cells. Dispatches by kind; extension
-/// widgets render generically from their manifest.
+/// Renders one widget; the grid sizes it to its span, so the tile fills its
+/// placed frame. In edit mode it shows a gear (per-widget settings), a trash
+/// (delete), and a bottom-right resize handle that changes the span in cells.
 struct WidgetTile: View {
-    let widget: DeckWidget
-    let cell: CGFloat
+    @Binding var widget: DeckWidget
     let editing: Bool
+    var cell: CGFloat = 80          // one grid cell, in points
+    var step: CGFloat = 88          // cell + spacing: pitch between cells
+    var maxCols: Int = 8
     var onDelete: () -> Void
 
-    private var size: CGSize {
-        CGSize(width: cell * CGFloat(widget.spanW) + 8 * CGFloat(widget.spanW - 1),
-               height: cell * CGFloat(widget.spanH) + 8 * CGFloat(widget.spanH - 1))
+    @State private var showConfig = false
+    // Live resize preview (cells). The model is only updated on release, so the
+    // handle never moves mid-drag — that feedback loop was the "jumps all over".
+    @State private var previewW: Int?
+    @State private var previewH: Int?
+
+    private func ghostSize(_ cells: Int) -> CGFloat {
+        cell * CGFloat(cells) + (step - cell) * CGFloat(cells - 1)
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            content
-                .frame(width: size.width, height: size.height)
-                .background(RoundedRectangle(cornerRadius: 14)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6)))
-                .overlay(RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-            if editing {
-                Button(action: onDelete) {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 16))
-                        .foregroundColor(.white.opacity(0.9))
-                        .background(Circle().fill(Color.black.opacity(0.4)))
-                }
-                .buttonStyle(.plain).padding(4)
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(RoundedRectangle(cornerRadius: 14)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6)))
+            .overlay(RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(alignment: .topLeading) { if previewW != nil { resizeGhost } }
+            .overlay(alignment: .topTrailing) { if editing { editControls } }
+            .overlay(alignment: .bottomTrailing) { if editing { resizeHandle } }
+            .popover(isPresented: $showConfig) { WidgetConfigEditor(widget: $widget) }
+    }
+
+    /// Snapped target outline drawn during a resize drag (anchored top-left,
+    /// can extend past the current tile to show the new span).
+    private var resizeGhost: some View {
+        let w = previewW ?? widget.spanW
+        let h = previewH ?? widget.spanH
+        return RoundedRectangle(cornerRadius: 14)
+            .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color.accentColor.opacity(0.12)))
+            .frame(width: ghostSize(w), height: ghostSize(h), alignment: .topLeading)
+            .overlay(alignment: .bottomTrailing) {
+                Text("\(w)×\(h)")
+                    .font(.system(size: 11, weight: .bold).monospacedDigit())
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Capsule().fill(Color.accentColor))
+                    .foregroundColor(.white).padding(4)
             }
+            .allowsHitTesting(false)
+    }
+
+    private var editControls: some View {
+        HStack(spacing: 4) {
+            iconBtn("gearshape.fill", tint: .black) { showConfig = true }
+            iconBtn("trash.fill", tint: .red) { onDelete() }
         }
+        .padding(4)
+    }
+
+    private func iconBtn(_ symbol: String, tint: Color, _ act: @escaping () -> Void) -> some View {
+        Button(action: act) {
+            Image(systemName: symbol).font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.white).frame(width: 22, height: 22)
+                .background(Circle().fill(tint == .red
+                    ? Color.red.opacity(0.85) : Color.black.opacity(0.5)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Drag to resize in whole cells. Updates only a PREVIEW during the drag
+    /// (the model — and thus the tile size and this handle — stay put, so the
+    /// gesture origin is stable and snapping is crisp). Commits on release.
+    /// `highPriorityGesture` so the ScrollView doesn't steal the drag.
+    private var resizeHandle: some View {
+        ZStack {
+            Circle().fill(Color.accentColor.opacity(0.95))
+            Image(systemName: "arrow.down.right")
+                .font(.system(size: 11, weight: .bold)).foregroundColor(.white)
+        }
+        .frame(width: 28, height: 28)
+        .contentShape(Rectangle().size(width: 44, height: 44))   // forgiving hit area
+        .padding(3)
+        .highPriorityGesture(DragGesture(minimumDistance: 2)
+            .onChanged { g in
+                previewW = Swift.max(1, Swift.min(maxCols,
+                            widget.spanW + Int((g.translation.width / step).rounded())))
+                previewH = Swift.max(1, Swift.min(6,
+                            widget.spanH + Int((g.translation.height / step).rounded())))
+            }
+            .onEnded { _ in
+                if let w = previewW { widget.spanW = w }
+                if let h = previewH { widget.spanH = h }
+                previewW = nil; previewH = nil
+            })
     }
 
     @ViewBuilder private var content: some View {
         switch widget.kind {
-        case "clock": ClockWidget()
+        case "clock": ClockWidget(h24: widget.config["h24"] == "1")
         case "media": MediaWidget()
+        case "volume": VolumeWidget()
+        case "claude": ClaudeUsageWidget(config: $widget.config)
         default:
             if let id = widget.extensionId,
                let m = WidgetRegistry.shared.manifest(id: id) {
@@ -176,18 +244,105 @@ struct WidgetTile: View {
     }
 }
 
+/// Per-widget settings popover (the gear). Options vary by widget kind.
+struct WidgetConfigEditor: View {
+    @Binding var widget: DeckWidget
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Widget Settings").font(.system(size: 14, weight: .bold))
+            switch widget.kind {
+            case "claude":
+                Text("Show").font(.system(size: 12, weight: .medium))
+                Picker("", selection: cfg("display", "both")) {
+                    Text("Tokens").tag("tokens")
+                    Text("Percent").tag("percent")
+                    Text("Both").tag("both")
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                TextField("5-hour token limit", text: cfgText("limit5h"))
+                    .textFieldStyle(.roundedBorder)
+                TextField("Weekly token limit", text: cfgText("limitWeek"))
+                    .textFieldStyle(.roundedBorder)
+                Text("Percent needs a limit. Usage is summed from local Claude Code logs on this Mac only — not Claude.ai or the official plan limit.")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            case "clock":
+                Toggle("24-hour clock", isOn: cfgBool("h24"))
+            default:
+                Text("No settings for this widget.")
+                    .font(.system(size: 12)).foregroundColor(.secondary)
+            }
+            HStack {
+                Spacer()
+                Text("Size \(widget.spanW)×\(widget.spanH)")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+            }
+        }
+        .padding(14).frame(width: 280)
+    }
+
+    private func cfgText(_ k: String) -> Binding<String> {
+        Binding(get: { widget.config[k] ?? "" },
+                set: { widget.config[k] = $0.isEmpty ? nil : $0 })
+    }
+    private func cfg(_ k: String, _ d: String) -> Binding<String> {
+        Binding(get: { widget.config[k] ?? d }, set: { widget.config[k] = $0 })
+    }
+    private func cfgBool(_ k: String) -> Binding<Bool> {
+        Binding(get: { widget.config[k] == "1" }, set: { widget.config[k] = $0 ? "1" : nil })
+    }
+}
+
 /// Built-in: live time + date.
 private struct ClockWidget: View {
+    var h24 = false
     @State private var now = Date()
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     var body: some View {
         VStack(spacing: 2) {
-            Text(now, format: .dateTime.hour().minute().second())
+            Text(now, format: h24
+                 ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute().second()
+                 : .dateTime.hour().minute().second())
                 .font(.system(size: 30, weight: .semibold).monospacedDigit())
             Text(now, format: .dateTime.weekday(.wide).month().day())
                 .font(.system(size: 12)).foregroundColor(.secondary)
         }
         .onReceive(tick) { now = $0 }
+    }
+}
+
+/// Built-in: output volume. Drag or tap anywhere on the bar to set; tap-to-set
+/// works even with click-only synthetic touches. Throttled to ~10 Hz.
+private struct VolumeWidget: View {
+    @State private var volume = 50.0
+    @State private var lastSent = Date.distantPast
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "speaker.wave.2.fill")
+                .font(.system(size: 13)).foregroundColor(.secondary)
+            GeometryReader { geo in
+                let h = geo.size.height
+                ZStack(alignment: .bottom) {
+                    RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.18))
+                    RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.8))
+                        .frame(height: max(8, h * volume / 100))
+                }
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0)
+                    .onChanged { g in
+                        volume = max(0, min(100, 100 * (1 - g.location.y / h)))
+                        if Date().timeIntervalSince(lastSent) > 0.1 {
+                            lastSent = Date(); DeckRunner.setVolume(Int(volume))
+                        }
+                    }
+                    .onEnded { _ in DeckRunner.setVolume(Int(volume)) })
+            }
+            Text("\(Int(volume))").font(.system(size: 11).monospacedDigit())
+                .foregroundColor(.secondary)
+        }
+        .padding(8)
     }
 }
 
@@ -277,5 +432,226 @@ private struct MissingWidget: View {
             Text(id).font(.system(size: 9)).foregroundColor(.secondary).lineLimit(1)
         }
         .padding(8).frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - built-in: Claude usage
+
+/// Reads Claude Code's local session logs (~/.claude/projects/**/*.jsonl) and
+/// reconstructs usage the way ccusage does:
+///  - de-duplicates entries by message id + request id (logs repeat across
+///    resumed sessions / multiple files);
+///  - groups entries into 5-hour SESSION BLOCKS — a block starts at the first
+///    message (floored to the hour, UTC) and ends 5h later or after a >5h gap,
+///    matching Claude's own window, not a naive "last 5 hours";
+///  - reports the ACTIVE block's tokens (the 5-hour number), the rolling
+///    7-day total (weekly), and the largest historical block (used as an
+///    auto limit so % is meaningful without knowing your plan cap).
+/// Purely local; no network. Off-thread on a 60s timer.
+final class ClaudeUsage: ObservableObject {
+    @Published var window5h = 0          // tokens in the currently-active 5h block
+    @Published var week = 0              // rolling 7-day total
+    @Published var maxBlock = 0          // largest block ever (auto-limit denominator)
+    @Published var available = true
+    private var timer: Timer?
+
+    func start() {
+        refresh()
+        let t = Timer(timeInterval: 60, repeats: true) { [weak self] _ in self?.refresh() }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+    func stop() { timer?.invalidate(); timer = nil }
+    deinit { stop() }
+
+    private func refresh() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let r = Self.scan()
+            DispatchQueue.main.async {
+                self?.window5h = r.active; self?.week = r.week
+                self?.maxBlock = r.maxBlock; self?.available = r.ok
+            }
+        }
+    }
+
+    private static let isoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let iso = ISO8601DateFormatter()
+    private static func parseDate(_ s: String) -> Date? {
+        isoFrac.date(from: s) ?? iso.date(from: s)
+    }
+    private static let utcCal: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+    private static func floorHour(_ d: Date) -> Date {
+        utcCal.date(from: utcCal.dateComponents([.year, .month, .day, .hour], from: d)) ?? d
+    }
+
+    static func scan() -> (active: Int, week: Int, maxBlock: Int, ok: Bool) {
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/projects")
+        guard let en = FileManager.default.enumerator(
+                at: root, includingPropertiesForKeys: nil) else { return (0, 0, 0, false) }
+
+        // 1) collect + de-dup entries (date, tokens)
+        var seen = Set<String>()
+        var entries: [(date: Date, tokens: Int)] = []
+        for case let url as URL in en where url.pathExtension == "jsonl" {
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            for line in content.split(separator: "\n") {
+                guard let data = line.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let tsStr = obj["timestamp"] as? String,
+                      let ts = parseDate(tsStr) else { continue }
+                let tok = tokens(in: obj)
+                if tok == 0 { continue }
+                if let key = dedupKey(obj) {
+                    if seen.contains(key) { continue }
+                    seen.insert(key)
+                }
+                entries.append((ts, tok))
+            }
+        }
+        if entries.isEmpty { return (0, 0, 0, false) }
+        entries.sort { $0.date < $1.date }
+
+        // 2) 7-day rolling total
+        let now = Date()
+        let weekAgo = now.addingTimeInterval(-7 * 86400)
+        let week = entries.filter { $0.date >= weekAgo }.reduce(0) { $0 + $1.tokens }
+
+        // 3) 5-hour session blocks (ccusage algorithm)
+        let blockSecs: TimeInterval = 5 * 3600
+        var blocks: [(start: Date, tokens: Int)] = []
+        var start: Date?, last: Date?, sum = 0
+        for e in entries {
+            if let s = start, let l = last,
+               e.date.timeIntervalSince(s) < blockSecs,
+               e.date.timeIntervalSince(l) < blockSecs {
+                sum += e.tokens; last = e.date
+            } else {
+                if let s = start { blocks.append((s, sum)) }
+                start = floorHour(e.date); last = e.date; sum = e.tokens
+            }
+        }
+        if let s = start { blocks.append((s, sum)) }
+
+        let maxBlock = blocks.map(\.tokens).max() ?? 0
+        // active = the last block if it's still within its 5h window
+        var active = 0
+        if let lastBlock = blocks.last,
+           now.timeIntervalSince(lastBlock.start) < blockSecs {
+            active = lastBlock.tokens
+        }
+        return (active, week, maxBlock, true)
+    }
+
+    /// ccusage-style de-dup key: message id + request id when present.
+    private static func dedupKey(_ obj: [String: Any]) -> String? {
+        let mid = (obj["message"] as? [String: Any])?["id"] as? String
+        let rid = (obj["requestId"] as? String) ?? (obj["request_id"] as? String)
+        if mid == nil && rid == nil { return nil }
+        return "\(mid ?? "")|\(rid ?? "")"
+    }
+
+    private static func tokens(in obj: [String: Any]) -> Int {
+        if let m = obj["message"] as? [String: Any], let u = m["usage"] as? [String: Any] {
+            return sumUsage(u)
+        }
+        if let u = obj["usage"] as? [String: Any] { return sumUsage(u) }
+        return 0
+    }
+    private static func sumUsage(_ u: [String: Any]) -> Int {
+        ["input_tokens", "output_tokens",
+         "cache_creation_input_tokens", "cache_read_input_tokens"]
+            .reduce(0) { $0 + ((u[$1] as? Int) ?? 0) }
+    }
+}
+
+/// Compact token formatter: 1234 → "1.2k", 1_200_000 → "1.2M".
+func formatTokens(_ n: Int) -> String {
+    switch n {
+    case 1_000_000...: return String(format: "%.1fM", Double(n) / 1_000_000)
+    case 1_000...:     return String(format: "%.1fk", Double(n) / 1_000)
+    default:           return "\(n)"
+    }
+}
+
+/// Built-in Claude usage tile: two rolling-window bars (5-hour, weekly). If the
+/// widget config carries `limit5h` / `limitWeek` token caps, the bars show a
+/// percentage of that cap; otherwise the 5-hour bar is shown relative to the
+/// weekly total as a rough at-a-glance fill.
+struct ClaudeUsageWidget: View {
+    @Binding var config: [String: String]
+    @StateObject private var usage = ClaudeUsage()
+
+    private var limit5h: Int? { config["limit5h"].flatMap { Int($0) } }
+    private var limitWeek: Int? { config["limitWeek"].flatMap { Int($0) } }
+    private var display: String { config["display"] ?? "both" }  // tokens | percent | both
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles").foregroundColor(Color(hex: "#D97757"))
+                Text("Claude Usage").font(.system(size: 12, weight: .semibold))
+            }
+            if usage.available {
+                // 5h bar: explicit limit, else auto-calibrate to the largest
+                // block seen so far (ccusage's "-t max" trick).
+                meter(title: "5-hour", value: usage.window5h, limit: limit5h,
+                      fallbackMax: max(usage.maxBlock, 1), tint: Color(hex: "#D97757"))
+                meter(title: "Week", value: usage.week, limit: limitWeek,
+                      fallbackMax: max(usage.week, 1), tint: Color(hex: "#3478F6"))
+            } else {
+                Text("No Claude logs found")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear { usage.start() }
+        .onDisappear { usage.stop() }
+    }
+
+    /// Readout respects the display mode: tokens, percent (needs a limit), or both.
+    private func readout(_ value: Int, _ limit: Int?) -> String {
+        let total = formatTokens(value)
+        guard let lim = limit, lim > 0 else {
+            return display == "percent" ? "— set limit" : total
+        }
+        let pct = Int(Swift.min(1.0, Double(value) / Double(lim)) * 100)
+        switch display {
+        case "tokens":  return "\(total) / \(formatTokens(lim))"
+        case "percent": return "\(pct)%"
+        default:        return "\(pct)%  ·  \(total)"
+        }
+    }
+
+    @ViewBuilder
+    private func meter(title: String, value: Int, limit: Int?,
+                       fallbackMax: Int, tint: Color) -> some View {
+        let cap = Double(limit ?? fallbackMax)
+        let frac = cap > 0 ? Swift.min(1.0, Double(value) / cap) : 0
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(title).font(.system(size: 11)).foregroundColor(.secondary)
+                Spacer()
+                Text(readout(value, limit))
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.18))
+                    Capsule().fill(tint.opacity(0.85))
+                        .frame(width: Swift.max(4, geo.size.width * frac))
+                }
+            }
+            .frame(height: 6)
+        }
     }
 }
