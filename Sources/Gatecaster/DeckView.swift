@@ -44,44 +44,53 @@ struct DeckView: View {
     // MARK: unified spanning grid — buttons (1×1) and widgets (W×H), first-fit
     // packed so some tiles use more cells and others fewer, all square-aligned.
 
+    // Fixed-ish cell size: the panel does NOT scroll. Making the panel bigger
+    // adds more grid cells (more columns/rows) rather than enlarging the tiles.
+    // The block size is user-set (Settings → deck menu → Block size).
+    private let gridSpacing: CGFloat = 8
+
     private var packedGrid: some View {
-        let cols = max(2, store.layout.columns)
-        let spacing: CGFloat = 8
-        let packed = packLayout(columns: cols)
+        let spacing = gridSpacing
+        let targetCell = CGFloat(settings.deckCellSize)
         return GeometryReader { geo in
+            // Columns from width at the target cell size; cell snaps to fill width.
+            let cols = max(2, Int((geo.size.width + spacing) / (targetCell + spacing)))
             let cell = (geo.size.width - spacing * CGFloat(cols - 1)) / CGFloat(cols)
-            // In edit mode, fill the viewport with empty grid cells (plus a few
-            // spare rows) so you can resize/drag into real empty space instead
-            // of growing over the existing tiles.
-            let viewportRows = max(1, Int((geo.size.height + spacing) / (cell + spacing)))
-            let gridRows = store.editing
-                ? max(packed.rows + 2, viewportRows)
-                : packed.rows
-            ScrollView {
-                ZStack(alignment: .topLeading) {
-                    if store.editing {
-                        gridGuides(cols: cols, rows: gridRows, cell: cell, spacing: spacing)
-                    }
-                    ForEach(packed.slots) { slot in
-                        tile(for: slot, cell: cell, step: cell + spacing, cols: cols)
-                            .frame(width: cell * CGFloat(slot.w) + spacing * CGFloat(slot.w - 1),
-                                   height: cell * CGFloat(slot.h) + spacing * CGFloat(slot.h - 1))
-                            .offset(x: CGFloat(slot.col) * (cell + spacing),
-                                    y: CGFloat(slot.row) * (cell + spacing))
-                            // Animate position + size so resizing/reflow glides
-                            // instead of teleporting (the packer moves tiles).
-                            .animation(.spring(response: 0.3, dampingFraction: 0.82),
-                                       value: "\(slot.col),\(slot.row),\(slot.w),\(slot.h)")
+            // Rows that fit the panel height (no scroll); edit mode fills the
+            // panel with empty guide cells so there's room to resize/drag into.
+            let fitRows = max(1, Int((geo.size.height + spacing) / (cell + spacing)))
+            let packed = packLayout(columns: cols)
+            let gridRows = store.editing ? max(packed.rows, fitRows) : packed.rows
+            ZStack(alignment: .topLeading) {
+                if store.editing {
+                    // A "+" in every empty cell — one unified add menu (these
+                    // also serve as the visible grid affordance).
+                    ForEach(emptyCells(cols: cols, rows: gridRows, occupied: packed.occupied),
+                            id: \.self) { key in
+                        let r = key / cols, c = key % cols
+                        AddCell(extensions: WidgetRegistry.shared.manifests,
+                                onPick: addElement)
+                            .frame(width: cell, height: cell)
+                            .offset(x: CGFloat(c) * (cell + spacing),
+                                    y: CGFloat(r) * (cell + spacing))
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .frame(height: CGFloat(gridRows) * cell
-                       + spacing * CGFloat(max(0, gridRows - 1)))
+                ForEach(packed.slots) { slot in
+                    tile(for: slot, cell: cell, step: cell + spacing, cols: cols)
+                        .frame(width: cell * CGFloat(slot.w) + spacing * CGFloat(slot.w - 1),
+                               height: cell * CGFloat(slot.h) + spacing * CGFloat(slot.h - 1))
+                        .offset(x: CGFloat(slot.col) * (cell + spacing),
+                                y: CGFloat(slot.row) * (cell + spacing))
+                        .animation(.spring(response: 0.3, dampingFraction: 0.82),
+                                   value: "\(slot.col),\(slot.row),\(slot.w),\(slot.h)")
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 
-    /// Faint dashed cell outlines shown in edit mode so snapping is visible.
+    /// (unused) Faint dashed cell outlines — kept for reference; empty cells now
+    /// render AddCell which provides the grid affordance.
     private func gridGuides(cols: Int, rows: Int, cell: CGFloat, spacing: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(0..<(cols * max(1, rows)), id: \.self) { idx in
@@ -111,54 +120,32 @@ struct DeckView: View {
                            onDelete: { delete(btn) })
                 .modifier(DraggableItem(id: btn.id, editing: store.editing,
                                         draggingID: $draggingID, reorder: reorder))
-        case .addButton:
-            Button { store.layout.pages[pageIndex].buttons.append(DeckButton()) } label: {
-                addTile(symbol: "plus", label: nil)
-            }
-            .buttonStyle(.plain)
-        case .addWidget:
-            Menu { addWidgetMenu } label: {
-                addTile(symbol: "puzzlepiece.extension", label: "Widget")
-            }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden)
         }
     }
 
-    private func addTile(symbol: String, label: String?) -> some View {
-        RoundedRectangle(cornerRadius: 12)
-            .strokeBorder(Color.secondary.opacity(0.4),
-                          style: StrokeStyle(lineWidth: 2, dash: [6]))
-            .overlay(VStack(spacing: 2) {
-                Image(systemName: symbol).font(.system(size: 20, weight: .semibold))
-                if let label { Text(label).font(.system(size: 10)) }
-            }.foregroundColor(.secondary))
+    /// Empty cell keys (row*cols + col) within the editable grid.
+    private func emptyCells(cols: Int, rows: Int, occupied: Set<Int>) -> [Int] {
+        var out: [Int] = []
+        for r in 0..<rows { for c in 0..<cols {
+            let k = r * cols + c
+            if !occupied.contains(k) { out.append(k) }
+        } }
+        return out
     }
 
-    @ViewBuilder private var addWidgetMenu: some View {
-        Button("Clock") { addWidget(kind: "clock") }
-        Button("Volume") { addWidget(kind: "volume") }
-        Button("Media controls") { addWidget(kind: "media") }
-        Button("Claude usage") { addWidget(kind: "claude") }
-        Button("Battery") { addWidget(kind: "battery") }
-        Button("CPU load") { addWidget(kind: "cpu") }
-        let exts = WidgetRegistry.shared.manifests
-        if !exts.isEmpty {
-            Divider()
-            ForEach(exts) { m in
-                Button(m.name) { addWidget(kind: "ext:\(m.id)") }
-            }
+    /// Unified add: "button" makes a blank button; any other value is a widget
+    /// kind. The packer drops it into the first free cell.
+    private func addElement(_ kind: String) {
+        if kind == "button" {
+            store.layout.pages[pageIndex].buttons.append(DeckButton())
+        } else {
+            let span = widgetDefaultSpan(kind)
+            let cols = max(2, store.layout.columns)
+            store.layout.pages[pageIndex].widgets.append(
+                DeckWidget(kind: kind, spanW: min(span.w, cols), spanH: span.h))
         }
-        Divider()
-        Button("Open Extensions Folder…") { NSWorkspace.shared.open(WidgetRegistry.folder) }
-        Button("Reload Extensions") { WidgetRegistry.shared.reload() }
     }
 
-    private func addWidget(kind: String) {
-        let span = widgetDefaultSpan(kind)
-        let cols = max(2, store.layout.columns)
-        store.layout.pages[pageIndex].widgets.append(
-            DeckWidget(kind: kind, spanW: min(span.w, cols), spanH: span.h))
-    }
     private func removeWidget(_ w: DeckWidget) {
         store.layout.pages[pageIndex].widgets.removeAll { $0.id == w.id }
     }
@@ -182,13 +169,15 @@ struct DeckView: View {
         let col: Int, row: Int, w: Int, h: Int
         let kind: Kind
         enum Kind {
-            case widget(DeckWidget), button(DeckButton), addButton, addWidget
+            case widget(DeckWidget), button(DeckButton)
         }
     }
 
     /// Place items in the page's unified order into a `columns`-wide grid, each
-    /// at the first free spot (top-to-bottom, left-to-right). Returns slots + rows.
-    private func packLayout(columns: Int) -> (slots: [GridSlot], rows: Int) {
+    /// at the first free spot (top-to-bottom, left-to-right). Returns slots,
+    /// row count, and the set of occupied cell keys (row*columns + col) so the
+    /// view can draw a "+" in every empty cell.
+    private func packLayout(columns: Int) -> (slots: [GridSlot], rows: Int, occupied: Set<Int>) {
         var occupied = Set<Int>()                       // key = row*columns + col
         func isFree(_ r: Int, _ c: Int, _ w: Int, _ h: Int) -> Bool {
             if c + w > columns { return false }
@@ -225,15 +214,8 @@ struct DeckView: View {
                                       kind: .button(btn)))
             }
         }
-        if store.editing {
-            let (r1, c1) = place(1, 1)
-            slots.append(GridSlot(id: "add-button", col: c1, row: r1, w: 1, h: 1, kind: .addButton))
-            let (r2, c2) = place(min(2, columns), 1)
-            slots.append(GridSlot(id: "add-widget", col: c2, row: r2, w: min(2, columns), h: 1,
-                                  kind: .addWidget))
-        }
         let rows = (occupied.map { $0 / columns }.max() ?? -1) + 1
-        return (slots, max(1, rows))
+        return (slots, max(1, rows), occupied)
     }
 
     // MARK: chrome (matches keyboard/trackpad panels; top bar = engine drag zone)
@@ -280,8 +262,13 @@ struct DeckView: View {
                 store.currentPage = max(0, store.currentPage - 1)
             }
             Divider()
-            Button("More Columns") { store.layout.columns = min(8, store.layout.columns + 1) }
-            Button("Fewer Columns") { store.layout.columns = max(2, store.layout.columns - 1) }
+            Menu("Block Size") {
+                Button("Small") { settings.deckCellSize = 84 }
+                Button("Medium") { settings.deckCellSize = 104 }
+                Button("Large") { settings.deckCellSize = 128 }
+            }
+            // Columns are derived from the panel size + block size — resize the
+            // panel (corner bean) to get more grid space.
         } label: {
             Image(systemName: "ellipsis.circle").font(.system(size: 24))
                 .frame(width: 36, height: 36).contentShape(Rectangle())
@@ -387,6 +374,65 @@ private struct PageChip: View {
                 }
                 .padding(10)
             }
+    }
+}
+
+// MARK: - add cell ("+" in every empty grid slot → unified add picker)
+
+private struct AddCell: View {
+    let extensions: [WidgetManifest]
+    let onPick: (String) -> Void           // "button" or a widget kind
+    @State private var show = false
+
+    var body: some View {
+        Button { show = true } label: {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.secondary.opacity(0.35),
+                              style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                .overlay(Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.secondary.opacity(0.7)))
+                .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $show, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Add").font(.system(size: 12, weight: .bold)).foregroundColor(.secondary)
+                pick("Button", "square.grid.2x2", "button")
+                Divider()
+                pick("Clock", "clock", "clock")
+                pick("Volume", "speaker.wave.2.fill", "volume")
+                pick("Media controls", "playpause.fill", "media")
+                pick("Claude usage", "sparkles", "claude")
+                pick("Battery", "battery.100", "battery")
+                pick("CPU load", "cpu", "cpu")
+                if !extensions.isEmpty {
+                    Divider()
+                    ForEach(extensions) { m in
+                        pick(m.name, m.symbol ?? "puzzlepiece.extension", "ext:\(m.id)")
+                    }
+                }
+                Divider()
+                Button {
+                    NSWorkspace.shared.open(WidgetRegistry.folder); show = false
+                } label: { Label("Open Extensions Folder…", systemImage: "folder") }
+                    .buttonStyle(.plain).font(.system(size: 12))
+                Button {
+                    WidgetRegistry.shared.reload(); show = false
+                } label: { Label("Reload Extensions", systemImage: "arrow.clockwise") }
+                    .buttonStyle(.plain).font(.system(size: 12))
+            }
+            .padding(12).frame(width: 220)
+        }
+    }
+
+    private func pick(_ title: String, _ symbol: String, _ kind: String) -> some View {
+        Button { onPick(kind); show = false } label: {
+            Label(title, systemImage: symbol).font(.system(size: 13))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 3)
     }
 }
 

@@ -111,6 +111,7 @@ final class AppSettings: ObservableObject {
     @Published var showFloatingControl = false // draggable touch launcher panel
     @Published var showTrackpad = false        // virtual trackpad panel
     @Published var showDeck = false            // Stream Deck-style control surface (v3 PoC)
+    @Published var deckCellSize = 104.0        // deck grid block size (pt); bigger = chunkier tiles
     @Published var panelBlur = true            // live glass blur behind panels; off = flat translucent (cheaper)
     @Published var trackpadGain = 1.5          // virtual trackpad cursor sensitivity
 
@@ -165,6 +166,7 @@ final class AppSettings: ObservableObject {
         var panelBlur: Bool?
         var keyPressFeedback: Bool?
         var keyPopup: Bool?
+        var deckCellSize: Double?
     }
 
     static let url = FileManager.default.homeDirectoryForCurrentUser
@@ -205,7 +207,7 @@ final class AppSettings: ObservableObject {
                  palmRejection: palmRejection, palmPanelGuard: palmPanelGuard,
                  palmClusterPts: palmClusterPts, showDeck: showDeck,
                  panelBlur: panelBlur, keyPressFeedback: keyPressFeedback,
-                 keyPopup: keyPopup)
+                 keyPopup: keyPopup, deckCellSize: deckCellSize)
     }
 
     private func apply(_ s: Snapshot) {
@@ -246,6 +248,7 @@ final class AppSettings: ObservableObject {
         panelBlur = s.panelBlur ?? true
         keyPressFeedback = s.keyPressFeedback ?? true
         keyPopup = s.keyPopup ?? true
+        deckCellSize = s.deckCellSize ?? 104
     }
 
     func save() {
@@ -281,5 +284,5 @@ final class AppSettings: ObservableObject {
         showFloatingControl: false, showTrackpad: false, trackpadGain: 1.5,
         palmRejection: true, palmPanelGuard: true, palmClusterPts: 56,
         showDeck: false, panelBlur: true,
-        keyPressFeedback: true, keyPopup: true)
+        keyPressFeedback: true, keyPopup: true, deckCellSize: 104)
 }

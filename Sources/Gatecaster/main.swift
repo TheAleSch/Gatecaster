@@ -192,8 +192,9 @@ final class AppController: NSObject, NSApplicationDelegate {
             debugMenu.addItem(it)
         }
         dbg("Show edge-gesture zones", #selector(toggleEdgeZones), settings.showEdgeZones)
-        dbg("Verbose logging", #selector(toggleVerboseLog), settings.verbose)
-        dbg("Capture trackpad gestures (learn format)", #selector(toggleCapture), capture.isRunning)
+        // Hidden for now (developer-only): verbose logging + gesture capture.
+        // dbg("Verbose logging", #selector(toggleVerboseLog), settings.verbose)
+        // dbg("Capture trackpad gestures (learn format)", #selector(toggleCapture), capture.isRunning)
         let dbgItem = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
         menu.addItem(dbgItem)
         menu.setSubmenu(debugMenu, for: dbgItem)
