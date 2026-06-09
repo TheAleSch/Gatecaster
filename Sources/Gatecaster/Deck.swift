@@ -256,6 +256,17 @@ enum DeckRunner {
         "home": 115, "end": 119, "pageup": 116, "pagedown": 121,
     ]
 
+    /// Reverse map for shortcut capture: keyCode → token our parser accepts.
+    static func keyName(for code: CGKeyCode) -> String? { keyNames[code] }
+    private static let keyNames: [CGKeyCode: String] = {
+        var m: [CGKeyCode: String] = [:]
+        for (name, code) in keycodes where m[code] == nil { m[code] = name }
+        // canonical names for codes that have multiple aliases
+        m[36] = "return"; m[53] = "esc"; m[51] = "delete"
+        m[48] = "tab"; m[49] = "space"; m[42] = "backslash"
+        return m
+    }()
+
     static func postKeystroke(_ spec: String) {
         let parts = spec.lowercased().split(separator: "+").map {
             $0.trimmingCharacters(in: .whitespaces)

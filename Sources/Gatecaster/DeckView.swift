@@ -436,6 +436,61 @@ private struct AddCell: View {
     }
 }
 
+// MARK: - keystroke capture ("record shortcut")
+
+/// Press a button, then press the real keys — captures the combo into our
+/// keystroke syntax (e.g. "cmd+shift+4"). Uses a GLOBAL key monitor because the
+/// deck is a non-activating panel (it never becomes key, so a local monitor
+/// wouldn't fire); the pressed keys also reach the focused app while recording,
+/// which is fine for a quick capture.
+struct KeyCaptureField: View {
+    @Binding var value: String
+    @State private var recording = false
+    @State private var monitor: Any?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(value.isEmpty ? "no shortcut" : value)
+                .font(.system(size: 13, weight: .medium).monospaced())
+                .foregroundColor(value.isEmpty ? .secondary : .primary)
+            Spacer()
+            Button(recording ? "Press keys… (esc cancels)" : "Record") {
+                recording ? stop() : start()
+            }
+            .font(.system(size: 12))
+            .tint(recording ? .red : .accentColor)
+        }
+        .padding(.vertical, 2)
+        .onDisappear(perform: stop)
+    }
+
+    private func start() {
+        recording = true
+        monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { ev in
+            let f = ev.modifierFlags
+            // esc with no modifiers cancels
+            if ev.keyCode == 53,
+               f.intersection([.command, .shift, .option, .control]).isEmpty {
+                stop(); return
+            }
+            guard let key = DeckRunner.keyName(for: CGKeyCode(ev.keyCode)) else { return }
+            var parts: [String] = []
+            if f.contains(.command) { parts.append("cmd") }
+            if f.contains(.shift) { parts.append("shift") }
+            if f.contains(.option) { parts.append("alt") }
+            if f.contains(.control) { parts.append("ctrl") }
+            if f.contains(.function) { parts.append("fn") }
+            parts.append(key)
+            value = parts.joined(separator: "+")
+            stop()
+        }
+    }
+    private func stop() {
+        recording = false
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+    }
+}
+
 // MARK: - drag-to-reorder (unified: buttons + widgets share one order)
 
 /// Makes any tile draggable in edit mode. On drop-enter it asks the parent to
@@ -607,6 +662,9 @@ private struct DeckButtonEditor: View {
 
             Picker("Action", selection: $button.action.kind) {
                 ForEach(DeckActionKind.allCases) { Text($0.label).tag($0) }
+            }
+            if button.action.kind == .keystroke {
+                KeyCaptureField(value: $button.action.value)
             }
             if button.action.kind != .none {
                 TextField("Value", text: $button.action.value)
