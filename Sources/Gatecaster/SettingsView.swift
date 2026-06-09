@@ -103,6 +103,7 @@ private struct LaunchAtLoginRow: View {
 
 extension Notification.Name {
     static let gcReconnectTouch = Notification.Name("gc.reconnectTouch")
+    static let gcDeckFullScreen = Notification.Name("gc.deckFullScreen")
 }
 
 /// Live permission checklist — the pattern popularized by Rectangle / AltTab:

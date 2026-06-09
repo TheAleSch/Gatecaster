@@ -112,6 +112,9 @@ final class AppSettings: ObservableObject {
     @Published var showTrackpad = false        // virtual trackpad panel
     @Published var showDeck = false            // Stream Deck-style control surface (v3 PoC)
     @Published var deckCellSize = 104.0        // deck grid block size (pt); bigger = chunkier tiles
+    @Published var panelFrames: [String: String] = [:]   // saved frames per panel (keyboard/trackpad/deck/floating)
+    @Published var deckBackground = "blur"     // deck panel background: blur | opaque | clear
+    @Published var deckOpacity = 0.9           // opaque-mode fill opacity
     @Published var panelBlur = true            // live glass blur behind panels; off = flat translucent (cheaper)
     @Published var trackpadGain = 1.5          // virtual trackpad cursor sensitivity
 
@@ -167,6 +170,9 @@ final class AppSettings: ObservableObject {
         var keyPressFeedback: Bool?
         var keyPopup: Bool?
         var deckCellSize: Double?
+        var panelFrames: [String: String]?
+        var deckBackground: String?
+        var deckOpacity: Double?
     }
 
     static let url = FileManager.default.homeDirectoryForCurrentUser
@@ -207,7 +213,9 @@ final class AppSettings: ObservableObject {
                  palmRejection: palmRejection, palmPanelGuard: palmPanelGuard,
                  palmClusterPts: palmClusterPts, showDeck: showDeck,
                  panelBlur: panelBlur, keyPressFeedback: keyPressFeedback,
-                 keyPopup: keyPopup, deckCellSize: deckCellSize)
+                 keyPopup: keyPopup, deckCellSize: deckCellSize,
+                 panelFrames: panelFrames, deckBackground: deckBackground,
+                 deckOpacity: deckOpacity)
     }
 
     private func apply(_ s: Snapshot) {
@@ -249,6 +257,9 @@ final class AppSettings: ObservableObject {
         keyPressFeedback = s.keyPressFeedback ?? true
         keyPopup = s.keyPopup ?? true
         deckCellSize = s.deckCellSize ?? 104
+        panelFrames = s.panelFrames ?? [:]
+        deckBackground = s.deckBackground ?? "blur"
+        deckOpacity = s.deckOpacity ?? 0.9
     }
 
     func save() {
@@ -284,5 +295,6 @@ final class AppSettings: ObservableObject {
         showFloatingControl: false, showTrackpad: false, trackpadGain: 1.5,
         palmRejection: true, palmPanelGuard: true, palmClusterPts: 56,
         showDeck: false, panelBlur: true,
-        keyPressFeedback: true, keyPopup: true, deckCellSize: 104)
+        keyPressFeedback: true, keyPopup: true, deckCellSize: 104,
+        panelFrames: [:], deckBackground: "blur", deckOpacity: 0.9)
 }

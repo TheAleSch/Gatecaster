@@ -88,10 +88,11 @@ the Deck's own buttons use:
 |-------------|------------------------------|--------------|
 | `app`       | `"Spotify"`                  | open an app by name or `.app` path |
 | `url`       | `"https://open.spotify.com"` | open a link |
-| `keystroke` | `"cmd+shift+m"`              | press a shortcut (`fn+f8` = play/pause) |
+| `keystroke` | `"cmd+shift+m"`              | press a shortcut, e.g. cmd+shift+m |
 | `shortcut`  | `"My Shortcut"`              | run an Apple Shortcut by name |
 | `shell`     | `"open ~/Music"`             | run a shell command |
 | `volume`    | `"40"`                       | set output volume (0–100) |
+| `media`     | `"playpause"`                | media key (also `next`/`previous`) |
 
 Add three media buttons:
 
@@ -102,9 +103,9 @@ Add three media buttons:
   "symbol": "music.note",
   "colorHex": "#32D74B",
   "buttons": [
-    { "symbol": "backward.fill",  "action": { "kind": "keystroke", "value": "fn+f7" } },
-    { "symbol": "playpause.fill", "action": { "kind": "keystroke", "value": "fn+f8" } },
-    { "symbol": "forward.fill",   "action": { "kind": "keystroke", "value": "fn+f9" } }
+    { "symbol": "backward.fill",  "action": { "kind": "media", "value": "previous" } },
+    { "symbol": "playpause.fill", "action": { "kind": "media", "value": "playpause" } },
+    { "symbol": "forward.fill",   "action": { "kind": "media", "value": "next" } }
   ]
 }
 ```
@@ -146,9 +147,9 @@ Wire it in:
   ],
 
   "buttons": [
-    { "symbol": "backward.fill",  "action": { "kind": "keystroke", "value": "fn+f7" } },
-    { "symbol": "playpause.fill", "action": { "kind": "keystroke", "value": "fn+f8" } },
-    { "symbol": "forward.fill",   "action": { "kind": "keystroke", "value": "fn+f9" } }
+    { "symbol": "backward.fill",  "action": { "kind": "media", "value": "previous" } },
+    { "symbol": "playpause.fill", "action": { "kind": "media", "value": "playpause" } },
+    { "symbol": "forward.fill",   "action": { "kind": "media", "value": "next" } }
   ],
 
   "refresh": {

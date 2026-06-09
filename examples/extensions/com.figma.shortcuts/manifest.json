@@ -4,18 +4,119 @@
   "symbol": "pencil.and.outline",
   "colorHex": "#A259FF",
   "minW": 3,
-  "minH": 2,
+  "minH": 1,
   "defaultW": 4,
   "defaultH": 2,
-  "fields": [
-    { "label": "Tip", "value": "Buttons fire Figma shortcuts (Figma must be focused)" }
-  ],
   "buttons": [
-    { "label": "Frame",     "symbol": "square.dashed",        "action": { "kind": "keystroke", "value": "f" } },
-    { "label": "Component", "symbol": "diamond",              "action": { "kind": "keystroke", "value": "cmd+alt+k" } },
-    { "label": "Pen",       "symbol": "scribble",             "action": { "kind": "keystroke", "value": "p" } },
-    { "label": "Text",      "symbol": "textformat",           "action": { "kind": "keystroke", "value": "t" } },
-    { "label": "Dev Mode",  "symbol": "chevron.left.forwardslash.chevron.right", "action": { "kind": "keystroke", "value": "shift+d" } },
-    { "label": "Hide UI",   "symbol": "rectangle.slash",      "action": { "kind": "keystroke", "value": "cmd+backslash" } }
+    {
+      "label": "Move",
+      "symbol": "cursorarrow",
+      "action": {
+        "kind": "keystroke",
+        "value": "v"
+      }
+    },
+    {
+      "label": "Frame",
+      "symbol": "square.dashed",
+      "action": {
+        "kind": "keystroke",
+        "value": "f"
+      }
+    },
+    {
+      "label": "Rectangle",
+      "symbol": "rectangle",
+      "action": {
+        "kind": "keystroke",
+        "value": "r"
+      }
+    },
+    {
+      "label": "Ellipse",
+      "symbol": "circle",
+      "action": {
+        "kind": "keystroke",
+        "value": "o"
+      }
+    },
+    {
+      "label": "Pen",
+      "symbol": "scribble",
+      "action": {
+        "kind": "keystroke",
+        "value": "p"
+      }
+    },
+    {
+      "label": "Text",
+      "symbol": "textformat",
+      "action": {
+        "kind": "keystroke",
+        "value": "t"
+      }
+    },
+    {
+      "label": "Comment",
+      "symbol": "bubble.left",
+      "action": {
+        "kind": "keystroke",
+        "value": "c"
+      }
+    },
+    {
+      "label": "Component",
+      "symbol": "diamond",
+      "action": {
+        "kind": "keystroke",
+        "value": "cmd+alt+k"
+      }
+    },
+    {
+      "label": "Group",
+      "symbol": "square.on.square",
+      "action": {
+        "kind": "keystroke",
+        "value": "cmd+g"
+      }
+    },
+    {
+      "label": "Dev Mode",
+      "symbol": "chevron.left.forwardslash.chevron.right",
+      "altLabel": "Design",
+      "altSymbol": "paintbrush.pointed",
+      "toggle": true,
+      "action": {
+        "kind": "keystroke",
+        "value": "shift+d"
+      }
+    },
+    {
+      "label": "Zoom Fit",
+      "symbol": "arrow.up.left.and.arrow.down.right",
+      "action": {
+        "kind": "keystroke",
+        "value": "shift+1"
+      }
+    },
+    {
+      "label": "Hide UI",
+      "symbol": "rectangle.slash",
+      "altLabel": "Show UI",
+      "altSymbol": "rectangle",
+      "toggle": true,
+      "action": {
+        "kind": "keystroke",
+        "value": "cmd+backslash"
+      }
+    },
+    {
+      "label": "Export",
+      "symbol": "square.and.arrow.up",
+      "action": {
+        "kind": "keystroke",
+        "value": "cmd+shift+e"
+      }
+    }
   ]
 }

@@ -1024,3 +1024,30 @@ percent requires a limit since local logs can't know the plan cap.
   **cpu** (`host_statistics`). Media now uses real NX media keys, not F-keys.
   Most other widgets (OBS, Spotify, timers, multi-tz, GPU…) are intended as
   registry extensions, not built-ins — see docs/WIDGET_IDEAS.md.
+
+## Deck: capture, persistence, full-screen, background, emoji
+
+- **Shortcut capture** (`KeyRecorder` in DeckView): the keystroke action editor
+  has a Record button. Because the deck is a non-activating panel (NSEvent
+  monitors are unreliable), capture uses a CGEvent keyDown tap that reads
+  keycode+flags, formats to our token syntax, and SWALLOWS the combo so
+  recording `cmd+shift+4` doesn't trigger it. Needs Accessibility.
+- **Panel persistence**: keyboard/trackpad/deck/floating frames are saved to
+  `settings.panelFrames[key]` (NSStringFromRect) when a drag/resize settles,
+  and restored in each `show*` via `savedFrame(key)`.
+- **Full screen**: deck ⋯ → Toggle Full Screen posts `.gcDeckFullScreen`;
+  `AppController.toggleDeckFullScreen` fills the touch display and toggles back
+  to the saved windowed frame.
+- **Background**: deck ⋯ → Background = blur | opaque | clear, stored in
+  `settings.deckBackground` (+ `deckOpacity` for opaque). Applied by DeckView's
+  `deckBackground` view.
+- **Block size**: `settings.deckCellSize` (Small/Medium/Large); columns derive
+  from panel width ÷ block size so resizing the panel adds cells, not size. No
+  inner scroll — the grid fills the panel.
+- **Add flow**: every empty cell renders an `AddCell` "+" → one popover with
+  Button + all widget kinds + installed extensions (replaces the old separate
+  add tiles / Menu which didn't open from touch).
+- **Built-in widgets** now also include **Emoji** (`EmojiWidget`): category
+  tabs + scrollable grid + recents; taps insert the emoji via
+  `DeckRunner.typeText` (synthesized Unicode keystroke). `typeText` and
+  `mediaKey` live in DeckRunner.

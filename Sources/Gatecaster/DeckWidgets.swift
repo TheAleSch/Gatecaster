@@ -52,6 +52,23 @@ struct WidgetManifest: Codable, Identifiable {
         var label: String?
         var symbol: String?
         var action: DeckAction
+        // Toggle button: tracks an on/off state and can show alternate
+        // label/icon when on. `actionAlt` fires when turning off (if absent,
+        // `action` fires both ways — e.g. a shortcut that itself toggles).
+        var toggle: Bool?
+        var altLabel: String?
+        var altSymbol: String?
+        var actionAlt: DeckAction?
+        // Multi-state button: cycles through these on each tap, showing the
+        // current state's label/icon and firing its action. Supersedes toggle.
+        var states: [ManifestState]?
+    }
+
+    /// One state of a multi-state button.
+    struct ManifestState: Codable, Hashable {
+        var label: String?
+        var symbol: String?
+        var action: DeckAction
     }
     struct ManifestRefresh: Codable, Hashable {
         var command: String              // zsh; stdout must be a flat JSON object
@@ -140,8 +157,10 @@ func widgetMinSpan(_ w: DeckWidget) -> (w: Int, h: Int) {
     case "clock":   return (2, 1)
     case "media":   return (2, 1)
     case "claude":  return (2, 2)
-    case "battery": return (2, 1)
-    case "cpu":     return (2, 1)
+    case "battery": return (1, 1)
+    case "cpu":     return (1, 1)
+    case "ram":     return (2, 1)
+    case "emoji":   return (3, 1)
     default:
         if let id = w.extensionId, let m = WidgetRegistry.shared.manifest(id: id) {
             return (max(1, m.minW ?? 2), max(1, m.minH ?? 1))
@@ -157,8 +176,10 @@ func widgetDefaultSpan(_ kind: String) -> (w: Int, h: Int) {
     case "clock":   return (2, 1)
     case "media":   return (2, 1)
     case "claude":  return (2, 2)
-    case "battery": return (2, 1)
-    case "cpu":     return (2, 1)
+    case "battery": return (1, 1)
+    case "cpu":     return (1, 1)
+    case "ram":     return (2, 2)
+    case "emoji":   return (4, 3)
     default:
         let id = kind.hasPrefix("ext:") ? String(kind.dropFirst(4)) : kind
         if let m = WidgetRegistry.shared.manifest(id: id) {
@@ -273,12 +294,18 @@ struct WidgetTile: View {
 
     @ViewBuilder private var content: some View {
         switch widget.kind {
-        case "clock": ClockWidget(h24: widget.config["h24"] == "1")
+        case "clock":
+            ClockWidget(h24: widget.config["h24"] == "1",
+                        zones: (widget.config["zones"] ?? "")
+                            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                            .filter { !$0.isEmpty })
         case "media": MediaWidget()
         case "volume": VolumeWidget()
         case "claude": ClaudeUsageWidget(config: $widget.config)
         case "battery": BatteryWidget()
         case "cpu": CPUWidget()
+        case "ram": RamWidget()
+        case "emoji": EmojiWidget()
         default:
             if let id = widget.extensionId,
                let m = WidgetRegistry.shared.manifest(id: id) {
@@ -315,6 +342,11 @@ struct WidgetConfigEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             case "clock":
                 Toggle("24-hour clock", isOn: cfgBool("h24"))
+                TextField("Time zones (comma-separated)", text: cfgText("zones"))
+                    .textFieldStyle(.roundedBorder)
+                Text("e.g. America/Los_Angeles, Europe/Zurich, Asia/Tokyo. Leave empty for local time. Tip: use IANA names.")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             default:
                 Text("No settings for this widget.")
                     .font(.system(size: 12)).foregroundColor(.secondary)
@@ -340,21 +372,53 @@ struct WidgetConfigEditor: View {
     }
 }
 
-/// Built-in: live time + date.
+/// Built-in: live time + date. Uses a DateFormatter (with en_US_POSIX) so the
+/// 24-hour setting is honored reliably, and supports multiple time zones.
 private struct ClockWidget: View {
     var h24 = false
+    var zones: [String] = []          // IANA ids; empty = local single clock
     @State private var now = Date()
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
     var body: some View {
-        VStack(spacing: 2) {
-            Text(now, format: h24
-                 ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute().second()
-                 : .dateTime.hour().minute().second())
-                .font(.system(size: 30, weight: .semibold).monospacedDigit())
-            Text(now, format: .dateTime.weekday(.wide).month().day())
-                .font(.system(size: 12)).foregroundColor(.secondary)
+        Group {
+            if zones.isEmpty {
+                VStack(spacing: 2) {
+                    Text(timeString(nil)).font(.system(size: 30, weight: .semibold).monospacedDigit())
+                    Text(dateString(nil)).font(.system(size: 12)).foregroundColor(.secondary)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(zones, id: \.self) { z in
+                        HStack {
+                            Text(zoneLabel(z)).font(.system(size: 12)).foregroundColor(.secondary)
+                                .lineLimit(1)
+                            Spacer()
+                            Text(timeString(TimeZone(identifier: z)))
+                                .font(.system(size: 16, weight: .semibold).monospacedDigit())
+                        }
+                    }
+                }
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onReceive(tick) { now = $0 }
+    }
+
+    private func fmt(_ tz: TimeZone?) -> DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        if let tz { f.timeZone = tz }
+        return f
+    }
+    private func timeString(_ tz: TimeZone?) -> String {
+        let f = fmt(tz); f.dateFormat = h24 ? "HH:mm:ss" : "h:mm:ss a"; return f.string(from: now)
+    }
+    private func dateString(_ tz: TimeZone?) -> String {
+        let f = fmt(tz); f.dateFormat = "EEEE, MMM d"; return f.string(from: now)
+    }
+    private func zoneLabel(_ id: String) -> String {
+        (id.split(separator: "/").last.map(String.init) ?? id).replacingOccurrences(of: "_", with: " ")
     }
 }
 
@@ -419,6 +483,8 @@ private struct MediaWidget: View {
 private struct ExtensionWidget: View {
     let manifest: WidgetManifest
     @StateObject private var data = WidgetDataSource()
+    @State private var on: Set<Int> = []        // toggle-button on/off state
+    @State private var stateIdx: [Int: Int] = [:]   // multi-state button index
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -427,6 +493,7 @@ private struct ExtensionWidget: View {
                     .foregroundColor(Color(hex: manifest.colorHex ?? "#8E8E93"))
                 Text(manifest.name).font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
+                Spacer()
             }
             ForEach(manifest.fields ?? [], id: \.label) { f in
                 HStack {
@@ -437,19 +504,14 @@ private struct ExtensionWidget: View {
                 }
             }
             if let buttons = manifest.buttons, !buttons.isEmpty {
-                Spacer(minLength: 0)
-                HStack(spacing: 6) {
-                    ForEach(buttons.indices, id: \.self) { i in
-                        let b = buttons[i]
-                        Button { DeckRunner.run(b.action) } label: {
-                            HStack(spacing: 3) {
-                                if let s = b.symbol { Image(systemName: s) }
-                                if let l = b.label { Text(l).font(.system(size: 10)) }
-                            }
-                            .padding(.horizontal, 8).padding(.vertical, 5)
-                            .background(Capsule().fill(Color.secondary.opacity(0.18)))
+                // Wrap into a grid of compact chips — a single HStack squished
+                // many buttons into tall slivers with vertically-broken labels.
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 6)],
+                              spacing: 6) {
+                        ForEach(buttons.indices, id: \.self) { i in
+                            chip(buttons[i], index: i)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -458,6 +520,49 @@ private struct ExtensionWidget: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear { if let r = manifest.refresh { data.start(r) } }
         .onDisappear { data.stop() }
+    }
+
+    private func chip(_ b: WidgetManifest.ManifestButton, index: Int) -> some View {
+        // Resolve current appearance + highlight across the three button kinds:
+        // multi-state (states[]), toggle (on/off), or plain.
+        let symbol: String?
+        let label: String?
+        let highlighted: Bool
+        if let states = b.states, !states.isEmpty {
+            let i = stateIdx[index] ?? 0
+            symbol = states[i].symbol ?? b.symbol
+            label = states[i].label ?? b.label
+            highlighted = i != 0
+        } else {
+            let isOn = on.contains(index)
+            symbol = (isOn ? b.altSymbol : nil) ?? b.symbol
+            label = (isOn ? b.altLabel : nil) ?? b.label
+            highlighted = isOn
+        }
+        return Button {
+            if let states = b.states, !states.isEmpty {
+                let i = stateIdx[index] ?? 0
+                DeckRunner.run(states[i].action)
+                stateIdx[index] = (i + 1) % states.count
+            } else if b.toggle == true {
+                if on.contains(index) { on.remove(index); DeckRunner.run(b.actionAlt ?? b.action) }
+                else { on.insert(index); DeckRunner.run(b.action) }
+            } else {
+                DeckRunner.run(b.action)
+            }
+        } label: {
+            VStack(spacing: 3) {
+                if let s = symbol { Image(systemName: s).font(.system(size: 16)) }
+                if let l = label {
+                    Text(l).font(.system(size: 9)).lineLimit(1).minimumScaleFactor(0.7)
+                }
+            }
+            .frame(maxWidth: .infinity).frame(height: 48)
+            .foregroundColor(highlighted ? .white : .primary)
+            .background(RoundedRectangle(cornerRadius: 8)
+                .fill(highlighted ? Color.accentColor.opacity(0.9) : Color.secondary.opacity(0.18)))
+        }
+        .buttonStyle(.plain)
     }
 
     private func value(for f: WidgetManifest.ManifestField) -> String {
@@ -712,27 +817,17 @@ private struct BatteryWidget: View {
     private let tick = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: icon).foregroundColor(tint)
-                Text("Battery").font(.system(size: 12, weight: .semibold))
-            }
-            if present {
-                Text("\(percent)%")
-                    .font(.system(size: 26, weight: .semibold).monospacedDigit())
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.secondary.opacity(0.18))
-                        Capsule().fill(tint)
-                            .frame(width: max(4, geo.size.width * CGFloat(percent) / 100))
-                    }
-                }
-                .frame(height: 6)
+        GeometryReader { geo in
+            let compact = geo.size.height < 80 || geo.size.width < 120
+            if compact {
+                StatCompact(symbol: icon, tint: tint,
+                            value: present ? "\(percent)%" : "—")
             } else {
-                Text("No battery").font(.system(size: 11)).foregroundColor(.secondary)
+                StatFull(title: "Battery", symbol: icon, tint: tint,
+                         value: present ? "\(percent)%" : "No battery",
+                         percent: present ? percent : nil)
             }
         }
-        .padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear(perform: refresh)
         .onReceive(tick) { _ in refresh() }
     }
@@ -768,23 +863,16 @@ private struct CPUWidget: View {
     private let tick = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "cpu").foregroundColor(.accentColor)
-                Text("CPU").font(.system(size: 12, weight: .semibold))
+        GeometryReader { geo in
+            let compact = geo.size.height < 80 || geo.size.width < 120
+            let tint: Color = usage > 80 ? .red : .accentColor
+            if compact {
+                StatCompact(symbol: "cpu", tint: tint, value: "\(usage)%")
+            } else {
+                StatFull(title: "CPU", symbol: "cpu", tint: tint,
+                         value: "\(usage)%", percent: usage)
             }
-            Text("\(usage)%")
-                .font(.system(size: 26, weight: .semibold).monospacedDigit())
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.secondary.opacity(0.18))
-                    Capsule().fill(usage > 80 ? Color.red : Color.accentColor)
-                        .frame(width: max(4, geo.size.width * CGFloat(usage) / 100))
-                }
-            }
-            .frame(height: 6)
         }
-        .padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear(perform: sample)
         .onReceive(tick) { _ in sample() }
     }
@@ -812,6 +900,140 @@ private struct CPUWidget: View {
     }
 }
 
+// MARK: - shared stat tile layouts
+
+/// Compact single-cell stat: centered icon + value (e.g. "62%").
+private struct StatCompact: View {
+    let symbol: String
+    let tint: Color
+    let value: String
+    var body: some View {
+        VStack(spacing: 2) {
+            Image(systemName: symbol).font(.system(size: 16)).foregroundColor(tint)
+            Text(value).font(.system(size: 17, weight: .semibold).monospacedDigit())
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Full stat tile: header (icon + title), big value, progress bar.
+private struct StatFull: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+    let value: String
+    var percent: Int?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).foregroundColor(tint)
+                Text(title).font(.system(size: 12, weight: .semibold))
+            }
+            Text(value).font(.system(size: 26, weight: .semibold).monospacedDigit())
+            if let percent {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.18))
+                        Capsule().fill(tint)
+                            .frame(width: max(4, geo.size.width * CGFloat(percent) / 100))
+                    }
+                }
+                .frame(height: 6)
+            }
+        }
+        .padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+// MARK: - built-in: RAM
+
+/// Memory usage via host_statistics64 + total from ProcessInfo; swap from sysctl.
+private struct RamWidget: View {
+    @State private var percent = 0
+    @State private var usedGB = 0.0
+    @State private var freeGB = 0.0
+    @State private var swapGB = 0.0
+    private let tick = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        GeometryReader { geo in
+            let compact = geo.size.height < 80 || geo.size.width < 120
+            let tint: Color = percent > 85 ? .red : (percent > 70 ? .orange : .accentColor)
+            if compact {
+                StatCompact(symbol: "memorychip", tint: tint, value: "\(percent)%")
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "memorychip").foregroundColor(tint)
+                        Text("RAM").font(.system(size: 12, weight: .semibold))
+                        Spacer()
+                        Text("\(percent)%").font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    }
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.secondary.opacity(0.18))
+                            Capsule().fill(tint)
+                                .frame(width: max(4, g.size.width * CGFloat(percent) / 100))
+                        }
+                    }
+                    .frame(height: 6)
+                    row("Used", String(format: "%.1f GB", usedGB))
+                    row("Free", String(format: "%.1f GB", freeGB))
+                    if swapGB > 0.05 { row("Swap", String(format: "%.1f GB", swapGB)) }
+                }
+                .padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        }
+        .onAppear(perform: sample)
+        .onReceive(tick) { _ in sample() }
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(.system(size: 11)).foregroundColor(.secondary)
+            Spacer()
+            Text(value).font(.system(size: 11, weight: .medium).monospacedDigit())
+        }
+    }
+
+    private func sample() {
+        DispatchQueue.global(qos: .utility).async {
+            let total = Double(ProcessInfo.processInfo.physicalMemory)
+            var stats = vm_statistics64_data_t()
+            var count = mach_msg_type_number_t(
+                MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
+            let kr = withUnsafeMutablePointer(to: &stats) {
+                $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                    host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                }
+            }
+            let page = Double(vm_kernel_page_size)
+            var usedBytes = 0.0
+            if kr == KERN_SUCCESS {
+                let active = Double(stats.active_count)
+                let wired = Double(stats.wire_count)
+                let compressed = Double(stats.compressor_page_count)
+                usedBytes = (active + wired + compressed) * page
+            }
+            // swap
+            var swap = xsw_usage()
+            var sz = MemoryLayout<xsw_usage>.size
+            var swapUsed = 0.0
+            if sysctlbyname("vm.swapusage", &swap, &sz, nil, 0) == 0 {
+                swapUsed = Double(swap.xsu_used)
+            }
+            let gb = 1024.0 * 1024.0 * 1024.0
+            let pct = total > 0 ? Int(usedBytes / total * 100) : 0
+            DispatchQueue.main.async {
+                percent = pct
+                usedGB = usedBytes / gb
+                freeGB = max(0, (total - usedBytes) / gb)
+                swapGB = swapUsed / gb
+            }
+        }
+    }
+}
+
 /// Run a process and return its stdout as a string (utility queue caller).
 private func shell(_ exe: String, _ args: [String]) -> String {
     let p = Process()
@@ -822,4 +1044,103 @@ private func shell(_ exe: String, _ args: [String]) -> String {
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
     p.waitUntilExit()
     return String(data: data, encoding: .utf8) ?? ""
+}
+
+// MARK: - built-in: Emoji picker
+
+/// A scrollable emoji grid (macOS-style). Tapping types the emoji into the
+/// focused app via a synthesized Unicode keystroke. Recently-used row on top.
+private struct EmojiWidget: View {
+    @State private var recent: [String] = []
+    @State private var category = 0
+
+    private static let categories: [(name: String, symbol: String, emoji: [String])] = [
+        ("Smileys", "face.smiling",
+         "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😗 😚 😙 😋 😛 😜 🤪 😝 🤗 🤭 🤫 🤔 🤐 😐 😑 😶 😏 😒 🙄 😬 😮‍💨 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤧 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐".split(separator: " ").map(String.init)),
+        ("Gestures", "hand.raised",
+         "👍 👎 👌 🤌 🤏 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ 👋 🤚 🖐️ ✋ 🖖 👏 🙌 🤝 🙏 💪 🫶 ❤️ 🔥 ⭐️ ✨ 🎉 ✅ ❌ ⚠️ 💯".split(separator: " ").map(String.init)),
+        ("Objects", "lightbulb",
+         "💻 ⌨️ 🖥️ 🖱️ 📱 ⏰ 📅 📌 📎 ✏️ 📝 📚 💡 🔋 🔌 🎧 🎵 📷 🎥 🔍 🔒 🔑 🛠️ ⚙️ 🚀 ☕️ 🍕 🍔 🎮 🏆".split(separator: " ").map(String.init)),
+    ]
+
+    @State private var offset: CGFloat = 0       // drag-scroll offset
+    @State private var startOffset: CGFloat = 0
+    @State private var contentH: CGFloat = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Segmented control (icons).
+            HStack(spacing: 0) {
+                ForEach(Self.categories.indices, id: \.self) { i in
+                    let sel = i == category
+                    Image(systemName: Self.categories[i].symbol)
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(maxWidth: .infinity).frame(height: 24)
+                        .background(RoundedRectangle(cornerRadius: 6)
+                            .fill(sel ? Color.accentColor : Color.clear))
+                        .foregroundColor(sel ? .white : .secondary)
+                        .contentShape(Rectangle())
+                        .onTapGesture { category = i; offset = 0; startOffset = 0 }
+                }
+            }
+            .padding(3)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.15)))
+            .padding(.horizontal, 8).padding(.top, 6)
+
+            // Drag-to-scroll grid (macOS ScrollView doesn't scroll on click-drag,
+            // and on the touchscreen taps arrive as mouse drags). The visible
+            // window is geo-sized and clipped; the content is offset within it.
+            GeometryReader { geo in
+                grid
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: EmojiHeightKey.self, value: g.size.height)
+                    })
+                    .offset(y: offset)
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+                    .clipped()
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(
+                        DragGesture(minimumDistance: 4)
+                            .onChanged { v in
+                                let minOff = min(0, geo.size.height - contentH)
+                                offset = max(minOff, min(0, startOffset + v.translation.height))
+                            }
+                            .onEnded { _ in startOffset = offset })
+                    .onPreferenceChange(EmojiHeightKey.self) { contentH = $0 }
+            }
+        }
+    }
+
+    private var grid: some View {
+        let cols = [GridItem(.adaptive(minimum: 46), spacing: 6)]
+        return VStack(alignment: .leading, spacing: 6) {
+            if !recent.isEmpty {
+                LazyVGrid(columns: cols, spacing: 6) {
+                    ForEach(recent, id: \.self) { e in cell(e) }
+                }
+                Divider()
+            }
+            LazyVGrid(columns: cols, spacing: 6) {
+                ForEach(Self.categories[category].emoji, id: \.self) { e in cell(e) }
+            }
+        }
+        .padding(.horizontal, 8).padding(.bottom, 8)
+    }
+
+    private func cell(_ e: String) -> some View {
+        Text(e).font(.system(size: 30))
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                DeckRunner.typeText(e)
+                recent.removeAll { $0 == e }
+                recent.insert(e, at: 0)
+                if recent.count > 12 { recent.removeLast() }
+            }
+    }
+}
+
+private struct EmojiHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

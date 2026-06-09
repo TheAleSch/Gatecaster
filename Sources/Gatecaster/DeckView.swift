@@ -38,7 +38,24 @@ struct DeckView: View {
                 .padding(.horizontal, 8).padding(.bottom, 8)
         }
         .padding(.top, 4)
-        .gcActiveBlur(cornerRadius: 16, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
+        .background(deckBackground)
+    }
+
+    /// Deck panel background: blur (live glass), opaque (flat fill), or clear
+    /// (transparent — just a hairline). Set via the deck ⋯ menu.
+    @ViewBuilder private var deckBackground: some View {
+        switch settings.deckBackground {
+        case "opaque":
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(settings.deckOpacity))
+                .overlay(RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
+        case "clear":
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+        default:
+            Color.clear.gcActiveBlur(cornerRadius: 16)
+        }
     }
 
     // MARK: unified spanning grid — buttons (1×1) and widgets (W×H), first-fit
@@ -262,10 +279,18 @@ struct DeckView: View {
                 store.currentPage = max(0, store.currentPage - 1)
             }
             Divider()
+            Button("Toggle Full Screen") {
+                NotificationCenter.default.post(name: .gcDeckFullScreen, object: nil)
+            }
             Menu("Block Size") {
                 Button("Small") { settings.deckCellSize = 84 }
                 Button("Medium") { settings.deckCellSize = 104 }
                 Button("Large") { settings.deckCellSize = 128 }
+            }
+            Menu("Background") {
+                Button("Blur") { settings.deckBackground = "blur" }
+                Button("Opaque") { settings.deckBackground = "opaque" }
+                Button("Transparent") { settings.deckBackground = "clear" }
             }
             // Columns are derived from the panel size + block size — resize the
             // panel (corner bean) to get more grid space.
@@ -406,6 +431,8 @@ private struct AddCell: View {
                 pick("Claude usage", "sparkles", "claude")
                 pick("Battery", "battery.100", "battery")
                 pick("CPU load", "cpu", "cpu")
+                pick("RAM", "memorychip", "ram")
+                pick("Emoji picker", "face.smiling", "emoji")
                 if !extensions.isEmpty {
                     Divider()
                     ForEach(extensions) { m in
@@ -438,15 +465,71 @@ private struct AddCell: View {
 
 // MARK: - keystroke capture ("record shortcut")
 
-/// Press a button, then press the real keys — captures the combo into our
-/// keystroke syntax (e.g. "cmd+shift+4"). Uses a GLOBAL key monitor because the
-/// deck is a non-activating panel (it never becomes key, so a local monitor
-/// wouldn't fire); the pressed keys also reach the focused app while recording,
-/// which is fine for a quick capture.
+/// System-wide key capture via a CGEvent tap (the deck is a non-activating
+/// panel, so NSEvent local/global monitors are unreliable here). The tap also
+/// SWALLOWS the captured combo so recording `cmd+shift+4` doesn't fire a
+/// screenshot. Requires Accessibility (Gatecaster already has it).
+final class KeyRecorder {
+    private var tap: CFMachPort?
+    private var src: CFRunLoopSource?
+    private var onCapture: ((String?) -> Void)?
+
+    func start(_ onCapture: @escaping (String?) -> Void) {
+        stop()
+        self.onCapture = onCapture
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        let cb: CGEventTapCallBack = { _, _, event, userInfo in
+            let me = Unmanaged<KeyRecorder>.fromOpaque(userInfo!).takeUnretainedValue()
+            return me.handle(event)
+        }
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+            eventsOfInterest: mask, callback: cb,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()) else {
+            onCapture(nil); return
+        }
+        self.tap = tap
+        let s = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        src = s
+        CFRunLoopAddSource(CFRunLoopGetMain(), s, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+    }
+
+    private func handle(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+        let f = event.flags
+        let hasMod = f.contains(.maskCommand) || f.contains(.maskShift)
+            || f.contains(.maskAlternate) || f.contains(.maskControl)
+        if code == 53, !hasMod { finish(nil); return nil }      // esc cancels
+        guard let key = DeckRunner.keyName(for: code) else { return nil }
+        var parts: [String] = []
+        if f.contains(.maskCommand) { parts.append("cmd") }
+        if f.contains(.maskShift) { parts.append("shift") }
+        if f.contains(.maskAlternate) { parts.append("alt") }
+        if f.contains(.maskControl) { parts.append("ctrl") }
+        if f.contains(.maskSecondaryFn) { parts.append("fn") }
+        parts.append(key)
+        finish(parts.joined(separator: "+"))
+        return nil                                              // swallow the combo
+    }
+
+    private func finish(_ s: String?) {
+        DispatchQueue.main.async { [weak self] in
+            self?.onCapture?(s); self?.stop()
+        }
+    }
+    func stop() {
+        if let tap = tap { CGEvent.tapEnable(tap: tap, enable: false) }
+        if let s = src { CFRunLoopRemoveSource(CFRunLoopGetMain(), s, .commonModes) }
+        tap = nil; src = nil; onCapture = nil
+    }
+}
+
+/// Press Record, then press the real keys — captured into our keystroke syntax.
 struct KeyCaptureField: View {
     @Binding var value: String
     @State private var recording = false
-    @State private var monitor: Any?
+    @State private var recorder = KeyRecorder()
 
     var body: some View {
         HStack(spacing: 8) {
@@ -455,39 +538,20 @@ struct KeyCaptureField: View {
                 .foregroundColor(value.isEmpty ? .secondary : .primary)
             Spacer()
             Button(recording ? "Press keys… (esc cancels)" : "Record") {
-                recording ? stop() : start()
+                if recording { recorder.stop(); recording = false }
+                else {
+                    recording = true
+                    recorder.start { captured in
+                        if let c = captured { value = c }
+                        recording = false
+                    }
+                }
             }
             .font(.system(size: 12))
             .tint(recording ? .red : .accentColor)
         }
         .padding(.vertical, 2)
-        .onDisappear(perform: stop)
-    }
-
-    private func start() {
-        recording = true
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { ev in
-            let f = ev.modifierFlags
-            // esc with no modifiers cancels
-            if ev.keyCode == 53,
-               f.intersection([.command, .shift, .option, .control]).isEmpty {
-                stop(); return
-            }
-            guard let key = DeckRunner.keyName(for: CGKeyCode(ev.keyCode)) else { return }
-            var parts: [String] = []
-            if f.contains(.command) { parts.append("cmd") }
-            if f.contains(.shift) { parts.append("shift") }
-            if f.contains(.option) { parts.append("alt") }
-            if f.contains(.control) { parts.append("ctrl") }
-            if f.contains(.function) { parts.append("fn") }
-            parts.append(key)
-            value = parts.joined(separator: "+")
-            stop()
-        }
-    }
-    private func stop() {
-        recording = false
-        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        .onDisappear { recorder.stop() }
     }
 }
 

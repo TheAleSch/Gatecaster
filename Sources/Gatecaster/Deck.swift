@@ -248,6 +248,7 @@ enum DeckRunner {
         "i": 34, "p": 35, "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42,
         ",": 43, "/": 44, "n": 45, "m": 46, ".": 47, "`": 50,
         "backslash": 42, "slash": 44, "comma": 43, "period": 47,
+        "quote": 39, "semicolon": 41, "minus": 27, "equal": 24,
         "return": 36, "enter": 36, "tab": 48, "space": 49, "delete": 51,
         "backspace": 51, "esc": 53, "escape": 53,
         "f1": 122, "f2": 120, "f3": 99, "f4": 118, "f5": 96, "f6": 97,
@@ -255,6 +256,21 @@ enum DeckRunner {
         "left": 123, "right": 124, "down": 125, "up": 126,
         "home": 115, "end": 119, "pageup": 116, "pagedown": 121,
     ]
+
+    /// Insert arbitrary text (e.g. an emoji) into the focused app via a
+    /// synthesized Unicode keystroke — no clipboard, no key mapping needed.
+    static func typeText(_ text: String) {
+        let src = CGEventSource(stateID: .hidSystemState)
+        let chars = Array(text.utf16)
+        if let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true) {
+            down.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: chars)
+            down.post(tap: .cghidEventTap)
+        }
+        if let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) {
+            up.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: chars)
+            up.post(tap: .cghidEventTap)
+        }
+    }
 
     /// Reverse map for shortcut capture: keyCode → token our parser accepts.
     static func keyName(for code: CGKeyCode) -> String? { keyNames[code] }

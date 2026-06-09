@@ -24,6 +24,7 @@ appear in the same menu to drop onto the rail.
   "name": "Now Playing",
   "symbol": "music.note",              // SF Symbol for the header
   "colorHex": "#32D74B",
+  "minW": 2, "minH": 1, "defaultW": 3, "defaultH": 2,  // optional size hints (cells)
 
   "fields": [                          // live read-outs (optional)
     { "label": "Track",  "refreshKey": "title" },
@@ -32,8 +33,11 @@ appear in the same menu to drop onto the rail.
   ],
 
   "buttons": [                         // tap targets (optional)
-    { "symbol": "playpause.fill", "action": { "kind": "keystroke", "value": "fn+f8" } },
-    { "label": "Open", "action": { "kind": "app", "value": "Spotify" } }
+    { "symbol": "playpause.fill", "action": { "kind": "media", "value": "playpause" } },
+    { "label": "Open", "action": { "kind": "app", "value": "Spotify" } },
+    { "label": "Dev Mode", "symbol": "chevron.left.forwardslash.chevron.right",
+      "toggle": true, "altLabel": "Design", "altSymbol": "paintbrush.pointed",
+      "action": { "kind": "keystroke", "value": "shift+d" } }
   ],
 
   "refresh": {                         // optional polling (optional)
@@ -55,6 +59,7 @@ The same safe set the Deck buttons use:
 | `shortcut`  | `My Shortcut`            | run an Apple Shortcut |
 | `shell`     | `open ~/Music`           | run a zsh command |
 | `volume`    | `40`                     | set output volume 0–100 |
+| `media`     | `playpause` / `next` / `previous` | media transport key |
 
 ### Live fields (`refresh`)
 
@@ -102,3 +107,43 @@ UIs, the planned path is a **WebView widget** — sandboxed HTML/JS with a tiny
 `gatecaster.*` JS bridge (read fields, fire actions). That is also portable:
 the same web widget runs on macOS (WKWebView) and Windows (WebView2). Tracked
 in DECK_PLAN.md.
+
+## Examples
+
+Two runnable packs ship in `examples/extensions/`:
+- `com.example.nowplaying` — live fields via a refresh command + media buttons.
+- `com.figma.shortcuts` — ~18 Figma shortcut buttons (no refresh).
+
+Install one by copying its folder into the Extensions location:
+```bash
+cp -R examples/extensions/com.figma.shortcuts \
+  ~/Library/Application\ Support/Gatecaster/Extensions/
+```
+Then Deck → tap a "+" → Reload Extensions.
+
+## Toggle buttons
+
+Add `"toggle": true` to a button to make it an on/off control: it highlights
+when on and can swap to `altLabel` / `altSymbol`. By default it fires `action`
+both ways (good for a shortcut that itself toggles, like Figma's Shift+D for
+Dev Mode). For separate on/off commands, add `actionAlt` — it fires when
+turning the button off.
+
+## Multi-state buttons
+
+For more than two states, give a button a `states` array — it cycles through
+them on each tap, showing the current state's `label`/`symbol` and firing its
+`action`. (Supersedes `toggle`, which is just the two-state case.)
+
+```json
+{ "label": "Quality",
+  "states": [
+    { "label": "Low",  "symbol": "1.circle",  "action": { "kind": "shortcut", "value": "Quality Low" } },
+    { "label": "Med",  "symbol": "2.circle",  "action": { "kind": "shortcut", "value": "Quality Med" } },
+    { "label": "High", "symbol": "3.circle",  "action": { "kind": "shortcut", "value": "Quality High" } }
+  ]
+}
+```
+
+Each tap fires the shown state's action, then advances to the next. The button
+highlights for any state past the first.

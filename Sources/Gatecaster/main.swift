@@ -308,10 +308,30 @@ final class AppController: NSObject, NSApplicationDelegate {
         } else {
             clampToTouchDisplay(w)
         }
+        saveFrame(w)
     }
 
     private func isTouchPanel(_ w: NSWindow) -> Bool {
         w === keyboardPanel || w === floatingPanel || w === trackpadPanel || w === deckPanel
+    }
+
+    // MARK: panel frame persistence (size + position survive relaunch)
+    private func panelKey(for w: NSWindow) -> String? {
+        if w === keyboardPanel { return "keyboard" }
+        if w === trackpadPanel { return "trackpad" }
+        if w === deckPanel { return "deck" }
+        if w === floatingPanel { return "floating" }
+        return nil
+    }
+    private func saveFrame(_ w: NSWindow) {
+        guard let key = panelKey(for: w), w.frame.width > 240 else { return }  // skip collapsed tabs
+        settings.panelFrames[key] = NSStringFromRect(w.frame)
+    }
+    /// Saved frame for a panel, clamped onto the touch display, or nil.
+    private func savedFrame(_ key: String) -> NSRect? {
+        guard let s = settings.panelFrames[key] else { return nil }
+        let r = NSRectFromString(s)
+        return (r.width > 40 && r.height > 40) ? r : nil
     }
 
     private func clampAllPanels() {
@@ -531,7 +551,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         let host = GlassHostingView(rootView: view)
         let sf = (nsScreen(for: selectedDisplay) ?? NSScreen.main)?.frame ?? engine.bounds
-        let rect = NSRect(x: sf.minX + 60, y: sf.midY - 200, width: 460, height: 420)
+        let rect = savedFrame("deck") ?? NSRect(x: sf.minX + 60, y: sf.midY - 200,
+                                                width: 460, height: 420)
         host.frame = NSRect(origin: .zero, size: rect.size)
         let panel = NSPanel(contentRect: rect, styleMask: [.nonactivatingPanel, .borderless],
                             backing: .buffered, defer: false)
@@ -547,6 +568,21 @@ final class AppController: NSObject, NSApplicationDelegate {
         panel.setFrame(rect, display: true)
         panel.orderFrontRegardless()
         deckPanel = panel
+    }
+
+    /// Toggle the deck between its saved size and filling the touch display.
+    @objc private func toggleDeckFullScreen() {
+        guard let panel = deckPanel,
+              let sf = (nsScreen(for: selectedDisplay) ?? NSScreen.main)?.frame else { return }
+        let isFull = abs(panel.frame.width - sf.width) < 4 && abs(panel.frame.height - sf.height) < 4
+        if isFull {
+            let r = savedFrame("deck") ?? NSRect(x: sf.minX + 60, y: sf.midY - 200,
+                                                 width: 460, height: 420)
+            panel.setFrame(r, display: true)
+        } else {
+            saveFrame(panel)                 // remember the windowed size first
+            panel.setFrame(sf, display: true)
+        }
     }
 
     private func hideDeck() { deckPanel?.orderOut(nil); deckPanel = nil }
@@ -744,11 +780,16 @@ final class AppController: NSObject, NSApplicationDelegate {
     @objc private func toggleCapture() { capture.toggle(); rebuildMenu() }
     @objc private func reconnectTouch() { hid.reconnect() }
     private var reconnectObserver: NSObjectProtocol?
+    private var deckFullObserver: NSObjectProtocol?
     func observeSettingsRequests() {
         // Settings → General → Touchscreen "Reconnect" button.
         reconnectObserver = NotificationCenter.default.addObserver(
             forName: .gcReconnectTouch, object: nil, queue: .main
         ) { [weak self] _ in self?.hid.reconnect() }
+        // Deck → Full Screen toggle.
+        deckFullObserver = NotificationCenter.default.addObserver(
+            forName: .gcDeckFullScreen, object: nil, queue: .main
+        ) { [weak self] _ in self?.toggleDeckFullScreen() }
     }
     @objc private func toggleEdgeZones() { settings.showEdgeZones.toggle(); rebuildMenu() }
     @objc private func toggleVerboseLog() { settings.verbose.toggle(); rebuildMenu() }
