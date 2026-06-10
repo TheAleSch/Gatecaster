@@ -20,6 +20,33 @@ struct DeckWidget: Codable, Identifiable, Hashable {
     var gridCol: Int?
     var gridRow: Int?
 
+    // Tolerant decode (forward/backward-compat): a widget saved before `config`
+    // or the span fields existed, or with a missing id, decodes to its default
+    // rather than hard-failing — Swift's synthesized decoder otherwise demands
+    // every non-optional key be present (defaults only feed memberwise init, not
+    // Decodable), so one missing field in a saved/exported deck would, via the
+    // `try?` in DeckStore.load/importLayout, silently discard the whole layout.
+    // gridCol/gridRow stay Optional: absent → nil → auto first-fit.
+    init() {}
+    init(id: UUID = UUID(), kind: String = "clock", spanW: Int = 2, spanH: Int = 2,
+         config: [String: String] = [:], gridCol: Int? = nil, gridRow: Int? = nil) {
+        self.id = id; self.kind = kind; self.spanW = spanW; self.spanH = spanH
+        self.config = config; self.gridCol = gridCol; self.gridRow = gridRow
+    }
+    enum CodingKeys: String, CodingKey {
+        case id, kind, spanW, spanH, config, gridCol, gridRow
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "clock"
+        spanW = try c.decodeIfPresent(Int.self, forKey: .spanW) ?? 2
+        spanH = try c.decodeIfPresent(Int.self, forKey: .spanH) ?? 2
+        config = try c.decodeIfPresent([String: String].self, forKey: .config) ?? [:]
+        gridCol = try c.decodeIfPresent(Int.self, forKey: .gridCol)
+        gridRow = try c.decodeIfPresent(Int.self, forKey: .gridRow)
+    }
+
     var isExtension: Bool { kind.hasPrefix("ext:") }
     var extensionId: String? { isExtension ? String(kind.dropFirst(4)) : nil }
 }
@@ -47,10 +74,57 @@ struct WidgetManifest: Codable, Identifiable {
     var buttons: [ManifestButton]?       // action buttons in the tile
     var refresh: ManifestRefresh?        // optional polling command → JSON
 
+    // Tolerant decode (forward/backward-compat). A future manifest schema that
+    // adds keys must still load older manifests, and a hand-written manifest
+    // missing an optional key must not nuke the whole registry reload (the `try?`
+    // in WidgetRegistry.reload would otherwise drop the entire extension). `id`
+    // and `name` have no natural default, so they fall back to "" — a nameless
+    // manifest is harmless (sorts empty) and far better than a hard failure.
+    init(id: String = "", name: String = "", symbol: String? = nil,
+         colorHex: String? = nil, minW: Int? = nil, minH: Int? = nil,
+         defaultW: Int? = nil, defaultH: Int? = nil,
+         fields: [ManifestField]? = nil, buttons: [ManifestButton]? = nil,
+         refresh: ManifestRefresh? = nil) {
+        self.id = id; self.name = name; self.symbol = symbol; self.colorHex = colorHex
+        self.minW = minW; self.minH = minH; self.defaultW = defaultW; self.defaultH = defaultH
+        self.fields = fields; self.buttons = buttons; self.refresh = refresh
+    }
+    enum CodingKeys: String, CodingKey {
+        case id, name, symbol, colorHex, minW, minH, defaultW, defaultH
+        case fields, buttons, refresh
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        symbol = try c.decodeIfPresent(String.self, forKey: .symbol)
+        colorHex = try c.decodeIfPresent(String.self, forKey: .colorHex)
+        minW = try c.decodeIfPresent(Int.self, forKey: .minW)
+        minH = try c.decodeIfPresent(Int.self, forKey: .minH)
+        defaultW = try c.decodeIfPresent(Int.self, forKey: .defaultW)
+        defaultH = try c.decodeIfPresent(Int.self, forKey: .defaultH)
+        fields = try c.decodeIfPresent([ManifestField].self, forKey: .fields)
+        buttons = try c.decodeIfPresent([ManifestButton].self, forKey: .buttons)
+        refresh = try c.decodeIfPresent(ManifestRefresh.self, forKey: .refresh)
+    }
+
     struct ManifestField: Codable, Hashable {
         var label: String
         var refreshKey: String?          // key into refresh JSON; else static `value`
         var value: String?
+
+        // Tolerant decode — a field with no `label` falls back to "" rather than
+        // failing the parent manifest's whole decode (forward/backward-compat).
+        init(label: String = "", refreshKey: String? = nil, value: String? = nil) {
+            self.label = label; self.refreshKey = refreshKey; self.value = value
+        }
+        enum CodingKeys: String, CodingKey { case label, refreshKey, value }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+            refreshKey = try c.decodeIfPresent(String.self, forKey: .refreshKey)
+            value = try c.decodeIfPresent(String.self, forKey: .value)
+        }
     }
     struct ManifestButton: Codable, Hashable {
         var label: String?
@@ -66,6 +140,32 @@ struct WidgetManifest: Codable, Identifiable {
         // Multi-state button: cycles through these on each tap, showing the
         // current state's label/icon and firing its action. Supersedes toggle.
         var states: [ManifestState]?
+
+        // Tolerant decode (forward/backward-compat): a button missing `action`
+        // falls back to a no-op DeckAction (default kind .none) instead of
+        // failing the manifest decode — a button that does nothing is a far
+        // better failure mode than a dropped extension.
+        init(label: String? = nil, symbol: String? = nil, action: DeckAction = DeckAction(),
+             toggle: Bool? = nil, altLabel: String? = nil, altSymbol: String? = nil,
+             actionAlt: DeckAction? = nil, states: [ManifestState]? = nil) {
+            self.label = label; self.symbol = symbol; self.action = action
+            self.toggle = toggle; self.altLabel = altLabel; self.altSymbol = altSymbol
+            self.actionAlt = actionAlt; self.states = states
+        }
+        enum CodingKeys: String, CodingKey {
+            case label, symbol, action, toggle, altLabel, altSymbol, actionAlt, states
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            label = try c.decodeIfPresent(String.self, forKey: .label)
+            symbol = try c.decodeIfPresent(String.self, forKey: .symbol)
+            action = try c.decodeIfPresent(DeckAction.self, forKey: .action) ?? DeckAction()
+            toggle = try c.decodeIfPresent(Bool.self, forKey: .toggle)
+            altLabel = try c.decodeIfPresent(String.self, forKey: .altLabel)
+            altSymbol = try c.decodeIfPresent(String.self, forKey: .altSymbol)
+            actionAlt = try c.decodeIfPresent(DeckAction.self, forKey: .actionAlt)
+            states = try c.decodeIfPresent([ManifestState].self, forKey: .states)
+        }
     }
 
     /// One state of a multi-state button.
@@ -73,10 +173,35 @@ struct WidgetManifest: Codable, Identifiable {
         var label: String?
         var symbol: String?
         var action: DeckAction
+
+        // Tolerant decode — missing `action` → no-op default (see ManifestButton).
+        init(label: String? = nil, symbol: String? = nil, action: DeckAction = DeckAction()) {
+            self.label = label; self.symbol = symbol; self.action = action
+        }
+        enum CodingKeys: String, CodingKey { case label, symbol, action }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            label = try c.decodeIfPresent(String.self, forKey: .label)
+            symbol = try c.decodeIfPresent(String.self, forKey: .symbol)
+            action = try c.decodeIfPresent(DeckAction.self, forKey: .action) ?? DeckAction()
+        }
     }
     struct ManifestRefresh: Codable, Hashable {
         var command: String              // zsh; stdout must be a flat JSON object
         var everySeconds: Double         // poll interval (min clamped to 2s)
+
+        // Tolerant decode (forward/backward-compat): missing `command` → "" (no
+        // poll runs) and missing `everySeconds` → 2 (the clamp floor) instead of
+        // failing the manifest decode.
+        init(command: String = "", everySeconds: Double = 2) {
+            self.command = command; self.everySeconds = everySeconds
+        }
+        enum CodingKeys: String, CodingKey { case command, everySeconds }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            command = try c.decodeIfPresent(String.self, forKey: .command) ?? ""
+            everySeconds = try c.decodeIfPresent(Double.self, forKey: .everySeconds) ?? 2
+        }
     }
 }
 
@@ -468,7 +593,7 @@ private struct VolumeWidget: View {
                         .frame(height: max(8, h * volume / 100))
                 }
                 .contentShape(Rectangle())
-                // Publish the bar's panel-local frame so the engine excludes it
+                // Publish the bar's screen-global frame (.global) so the engine excludes it
                 // from deck scroll routing and instead sends a real mouse drag —
                 // without this, a touch-drag here scrolls (the bar never updates).
                 .background(GeometryReader { g in

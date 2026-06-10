@@ -1109,3 +1109,22 @@ inside one. The engine then takes the interior `.dragging` path
 the volume. Without this the whole content area scrolled and the bar never moved
 — `highPriorityGesture` on the bar couldn't help, because the engine never
 delivered a drag to begin with.
+
+> **Coordinate-space gotcha (do not "simplify" this mapping).** The frame each
+> `VolumeWidget` publishes comes from `GeometryReader { $0.frame(in: .global) }`.
+> SwiftUI's `.global` is global **to the SwiftUI tree**, which for an
+> `NSHostingView` is the *root hosting view's* bounds — i.e. **panel-content-local**
+> (top-left origin), **NOT** screen-global. So `deckScrollRegion` must offset each
+> rect by the panel's screen origin exactly like it builds `region`:
+> `x += f.minX`, `y += (flip - f.maxY)` (flip = primary-screen `maxY`, AppKit
+> bottom-left → Quartz top-left). The incoming `cg` from the engine *is* already
+> screen-global Quartz, so the two only line up after that offset.
+>
+> A code review (June 2026) confidently claimed `.global` was "already
+> screen-global" and that adding the panel origin "double-transformed" it; the
+> rects were changed to compare against `cg` directly. That silently moved every
+> exclusion rect by the panel's on-screen offset, so no touch ever matched a
+> volume bar and the slider drag died again — the *exact* regression this section
+> exists to prevent. SwiftUI has no AppKit window/screen in its coordinate
+> vocabulary, so `.global` can never be screen-global from inside a hosting view.
+> If you think this mapping is redundant, you're about to reintroduce the bug.

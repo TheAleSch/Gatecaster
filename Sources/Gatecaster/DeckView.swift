@@ -310,13 +310,20 @@ struct DeckView: View {
         }
         func firstFit(_ w: Int, _ h: Int) -> (Int, Int) {
             var r = 0
+            // Cap the scan so a fully-packed grid can't spin forever and hang the
+            // UI thread; only reachable with ~16k tiles, so it's a safety net.
             while r < 4096 {                       // hard safety cap (no infinite spin)
                 for c in 0...max(0, columns - w) where isFree(r, c, w, h) {
                     mark(r, c, w, h); return (r, c)
                 }
                 r += 1
             }
-            return (0, 0)
+            // Cap exhausted: append below everything rather than collide. Cell
+            // (0,0) was already scanned (likely occupied), so returning it would
+            // overlap an existing tile. Row 4096 was never marked by isFree/mark
+            // (they only touch rows 0..<4096), so this cell is guaranteed free.
+            mark(4096, 0, w, h)
+            return (4096, 0)
         }
         // Honor the stored cell if it fits and is free; else fall back to first-fit.
         func place(col: Int?, row: Int?, _ wIn: Int, _ hIn: Int) -> (Int, Int) {

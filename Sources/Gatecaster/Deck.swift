@@ -48,6 +48,24 @@ enum DeckActionKind: String, Codable, CaseIterable, Identifiable {
 struct DeckAction: Codable, Hashable {
     var kind: DeckActionKind = .none
     var value: String = ""
+
+    // Tolerant decode: a missing key falls back to the property's default rather
+    // than failing the whole decode. Swift's synthesized decoder requires EVERY
+    // non-optional field to be present even when it has a default (defaults only
+    // serve memberwise init, not Decodable) — so an older/partial saved deck or a
+    // `.gatedeck` exported before a field existed would hard-fail and (via the
+    // `try?` at the call sites) silently wipe the user's whole layout. Forward/
+    // backward-compat rule: missing key → default, never a decode failure.
+    init() {}
+    init(kind: DeckActionKind = .none, value: String = "") {
+        self.kind = kind; self.value = value
+    }
+    enum CodingKeys: String, CodingKey { case kind, value }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decodeIfPresent(DeckActionKind.self, forKey: .kind) ?? .none
+        value = try c.decodeIfPresent(String.self, forKey: .value) ?? ""
+    }
 }
 
 struct DeckButton: Codable, Identifiable, Hashable {
@@ -62,6 +80,33 @@ struct DeckButton: Codable, Identifiable, Hashable {
     // the item still lands on the same logical cell.
     var gridCol: Int?
     var gridRow: Int?
+
+    // Tolerant decode — see DeckAction. Any missing key (e.g. a deck saved before
+    // `action`/`colorHex` existed) falls back to the default; a stored id is
+    // honored when present so identity survives a round-trip, but a layout missing
+    // ids still loads (each gets a fresh UUID) instead of being discarded.
+    // gridCol/gridRow stay Optional: absent → nil → auto first-fit by the packer.
+    init() {}
+    init(id: UUID = UUID(), title: String = "Button", symbol: String = "square.grid.2x2",
+         colorHex: String = "", action: DeckAction = DeckAction(),
+         gridCol: Int? = nil, gridRow: Int? = nil) {
+        self.id = id; self.title = title; self.symbol = symbol
+        self.colorHex = colorHex; self.action = action
+        self.gridCol = gridCol; self.gridRow = gridRow
+    }
+    enum CodingKeys: String, CodingKey {
+        case id, title, symbol, colorHex, action, gridCol, gridRow
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? "Button"
+        symbol = try c.decodeIfPresent(String.self, forKey: .symbol) ?? "square.grid.2x2"
+        colorHex = try c.decodeIfPresent(String.self, forKey: .colorHex) ?? ""
+        action = try c.decodeIfPresent(DeckAction.self, forKey: .action) ?? DeckAction()
+        gridCol = try c.decodeIfPresent(Int.self, forKey: .gridCol)
+        gridRow = try c.decodeIfPresent(Int.self, forKey: .gridRow)
+    }
 }
 
 struct DeckPage: Codable, Identifiable, Hashable {
@@ -70,6 +115,26 @@ struct DeckPage: Codable, Identifiable, Hashable {
     var buttons: [DeckButton] = []
     var widgets: [DeckWidget] = []      // wider live tiles (clock/media/extensions)
     var order: [UUID] = []              // unified pack + drag order across both
+
+    // Tolerant decode — see DeckAction. A page saved before `widgets`/`order`
+    // existed (older single-grid layouts) decodes those as empty rather than
+    // failing; `resolvedOrder` already backfills order when it's empty, so an old
+    // page still renders. Missing id → fresh UUID; missing name → "Page".
+    init() {}
+    init(id: UUID = UUID(), name: String = "Page", buttons: [DeckButton] = [],
+         widgets: [DeckWidget] = [], order: [UUID] = []) {
+        self.id = id; self.name = name; self.buttons = buttons
+        self.widgets = widgets; self.order = order
+    }
+    enum CodingKeys: String, CodingKey { case id, name, buttons, widgets, order }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Page"
+        buttons = try c.decodeIfPresent([DeckButton].self, forKey: .buttons) ?? []
+        widgets = try c.decodeIfPresent([DeckWidget].self, forKey: .widgets) ?? []
+        order = try c.decodeIfPresent([UUID].self, forKey: .order) ?? []
+    }
 
     /// Pack/drag order across widgets and buttons. Falls back to
     /// widgets-then-buttons for layouts saved before `order` existed, and keeps
@@ -93,6 +158,29 @@ struct DeckLayout: Codable {
     // absolute cell (gridCol/gridRow), kept until moved again.
     var autoArrange = true
     var pages: [DeckPage] = []
+
+    // Tolerant decode — see DeckAction. This is the top-level on-disk format, so
+    // it's the most important to keep loading: a `~/gatecaster-deck.json` written
+    // before `autoArrange`/`showVolumeSlider` existed must still load with those
+    // at their defaults (autoArrange true, showVolumeSlider true, columns 4)
+    // rather than hard-failing the decode and (via `try?` in load/importLayout)
+    // silently throwing away the entire deck.
+    init() {}
+    init(columns: Int = 4, showVolumeSlider: Bool = true,
+         autoArrange: Bool = true, pages: [DeckPage] = []) {
+        self.columns = columns; self.showVolumeSlider = showVolumeSlider
+        self.autoArrange = autoArrange; self.pages = pages
+    }
+    enum CodingKeys: String, CodingKey {
+        case columns, showVolumeSlider, autoArrange, pages
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        columns = try c.decodeIfPresent(Int.self, forKey: .columns) ?? 4
+        showVolumeSlider = try c.decodeIfPresent(Bool.self, forKey: .showVolumeSlider) ?? true
+        autoArrange = try c.decodeIfPresent(Bool.self, forKey: .autoArrange) ?? true
+        pages = try c.decodeIfPresent([DeckPage].self, forKey: .pages) ?? []
+    }
 }
 
 // MARK: - store (persistence + import/export)

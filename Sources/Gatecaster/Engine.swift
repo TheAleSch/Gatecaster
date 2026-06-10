@@ -433,6 +433,14 @@ final class Engine {
             // A staggered first finger may have begun a one-finger drag; release
             // it so a click isn't held down through the gesture.
             if mode == .dragging { Pointer.leftUp(pLast) }
+            // CONSTRAINT: "always send the ended phase for every gesture you begin."
+            // A one-finger scroll (.fscroll) leaves an OPEN scroll phase; handleTwoFinger
+            // resets phaseOpen by hand without emitting phEnded, abandoning the gesture
+            // with a dangling phase — which wedges the macOS recognizer system-wide
+            // (touchscreen AND built-in trackpad) until the process exits. Close it
+            // first (mirrors the 3-finger swipe path above). endScrollPhase() is a
+            // no-op when no phase is open, so it's safe for .idle/.maybeTap/.dragging.
+            if mode == .fscroll { closeSmoothGestures(); endScrollPhase() }
             handleTwoFinger(contacts, t)
             return
         }

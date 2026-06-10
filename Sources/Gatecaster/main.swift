@@ -29,6 +29,11 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var padBag: AnyCancellable?
     private var deckPanel: NSPanel?
     private var deckBag: AnyCancellable?
+    // Pre-full-screen deck frame, kept in a dedicated ivar (NOT the persisted
+    // panelFrames["deck"] slot) because the didResize→settleFrame observer would
+    // otherwise overwrite that slot with the full-screen frame, so toggling
+    // full-screen OFF would "restore" to full size. Non-nil ⇔ deck is full-screen.
+    private var deckFullScreenRestore: NSRect?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         // SINGLE INSTANCE: two engines fighting over the same HID device put the
@@ -326,6 +331,10 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
     private func saveFrame(_ w: NSWindow) {
         guard let key = panelKey(for: w), w.frame.width > 240 else { return }  // skip collapsed tabs
+        // Don't persist the deck while it's full-screen — that frame belongs in the
+        // dedicated restore ivar, not the slot we reopen the deck at. (The toggle's
+        // own restore-branch saveFrame still records the non-full frame.)
+        if w === deckPanel, deckFullScreenRestore != nil { return }
         settings.panelFrames[key] = NSStringFromRect(w.frame)
     }
     /// Saved frame for a panel, clamped onto the touch display, or nil.
@@ -579,15 +588,19 @@ final class AppController: NSObject, NSApplicationDelegate {
         guard let panel = deckPanel,
               let screen = nsScreen(for: selectedDisplay) ?? NSScreen.main else { return }
         let sf = screen.frame
-        let isFull = abs(panel.frame.width - sf.width) < 4 && abs(panel.frame.height - sf.height) < 4
-        if isFull {
+        // Source of truth for "are we full-screen" is the restore ivar, not a
+        // size compare (a near-full manual resize must not read as full-screen).
+        if let restore = deckFullScreenRestore {
             panel.level = .floating
             NSApp.presentationOptions = []
-            let r = savedFrame("deck") ?? NSRect(x: sf.minX + 60, y: sf.midY - 200,
-                                                 width: 460, height: 420)
+            deckFullScreenRestore = nil
+            let r = (restore.width > 40 && restore.height > 40) ? restore
+                  : (savedFrame("deck") ?? NSRect(x: sf.minX + 60, y: sf.midY - 200,
+                                                  width: 460, height: 420))
             panel.setFrame(r, display: true)
+            saveFrame(panel)                       // persist the restored (non-full) frame
         } else {
-            saveFrame(panel)
+            deckFullScreenRestore = panel.frame    // remember pre-full size/pos
             // .screenSaver level (1000) is above the menu bar (24) and Dock — the panel
             // covers them rather than relying on the app being frontmost for presentationOptions.
             panel.level = .screenSaver
@@ -611,13 +624,25 @@ final class AppController: NSObject, NSApplicationDelegate {
         guard let panel = deckPanel, !DeckStore.shared.editing else { return false }
         let flip = NSScreen.screens.first?.frame.maxY ?? 0
         let f = panel.frame
-        let header: CGFloat = 50
+        // Non-grid header strip above DeckView's scrollable `activeGrid`. Must match
+        // DeckView.body's layout EXACTLY or we get a dead zone (excluding too much)
+        // or scroll interference over the page bar (excluding too little):
+        //   .padding(.top, 4) + header(36) + VStack spacing(6) + pageBar(30) + spacing(6)
+        // = 82pt. (header's tallest content is the 36pt button row; pageBar is
+        // .frame(height: 30).) Hardcoded-but-derived so a DeckView layout change is
+        // a visible one-line update here.
+        let header: CGFloat = 4 + 36 + 6 + 30 + 6
         let region = CGRect(x: f.minX, y: (flip - f.maxY) + header,
                             width: f.width, height: max(0, f.height - header))
         guard region.contains(cg) else { return false }
         // Volume bars opt OUT of scroll routing: a drag there must reach the bar's
-        // SwiftUI gesture as a real mouse drag. Their frames are panel-local (top-
-        // left points from `.global`); map each into CG screen space and exclude.
+        // SwiftUI gesture as a real mouse drag. DeckWidgets publishes each bar's
+        // frame via `g.frame(in: .global)`, which for an NSHostingView is the ROOT
+        // hosting view's space — i.e. panel-content-LOCAL (top-left origin), NOT
+        // screen-global. So map it into screen Quartz coords the same way `region`
+        // is built: x += panel left (f.minX), y += panel top (flip - f.maxY).
+        // (A prior "simplification" to compare cg against the raw rect placed the
+        // exclusion at the wrong spot and killed the slider drag — do not re-do it.)
         for local in DeckDragRegions.volumeRects.values {
             let cgRect = CGRect(x: f.minX + local.minX, y: (flip - f.maxY) + local.minY,
                                 width: local.width, height: local.height)
