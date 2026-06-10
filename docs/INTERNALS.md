@@ -1051,3 +1051,35 @@ percent requires a limit since local logs can't know the plan cap.
   tabs + scrollable grid + recents; taps insert the emoji via
   `DeckRunner.typeText` (synthesized Unicode keystroke). `typeText` and
   `mediaKey` live in DeckRunner.
+
+## Deck Settings, themes, transparency, extension manager
+
+`DeckSettingsView` (sheet from deck ⋯ → Deck Settings) provides:
+- **Themes** (`DeckTheme`): Midnight, Darkness (pure black, forced opaque),
+  Graphite, Glass (live blur), Aurora (gradient), Daylight (light). A theme sets
+  the panel background AND `\.environment(\.colorScheme)`, so built-in widgets +
+  neutral keycaps (system colors) adapt automatically. Stored in
+  `settings.deckTheme`.
+- **Transparency**: `settings.deckOpacity` modulates solid/gradient themes
+  (ignored by forced-opaque themes like Darkness).
+- **Extension manager**: lists installed packs (folders under the Extensions
+  dir), with add (open folder) / reload / delete (removes the folder).
+
+Authoring guidance (declare accent + content, not absolute colors) is in
+docs/EXTENSIONS.md → "Theming & styling". Roadmap: in-app extension downloads
+(#46), per-page import/export + cloud backup (#47).
+
+## Deck widget scrolling (engine-driven)
+
+SwiftUI `DragGesture` doesn't reliably receive the engine's synthesized drags
+on a non-key panel, and a native `ScrollView` only scrolls on scroll-wheel
+events — so neither worked alone. The fix: the engine drives it.
+
+When a one-finger drag starts over a scrollable deck region (`Engine.deckScrollAt`
+→ `AppController.deckScrollRegion`: inside the deck panel, below the ~50pt
+header, and NOT in edit mode), the engine enters `.fscroll` and emits real
+scroll-wheel events (with phase + momentum) at the cursor. macOS delivers those
+to the `ScrollView` under the cursor — which scrolls natively, even though the
+panel isn't key. Widgets (emoji grid, extension chip grid) just use a plain
+`ScrollView`. Taps still go through the click path, so buttons keep working;
+edit-mode interior drags stay mouse-drags for resize/reorder.

@@ -14,6 +14,7 @@ enum DeckActionKind: String, Codable, CaseIterable, Identifiable {
     case shell      // run a shell command (zsh)
     case volume     // set output volume to a fixed percent
     case media      // media key: play/pause, next, previous
+    case page       // switch the deck to another page (by name or number)
 
     var id: String { rawValue }
     var label: String {
@@ -26,6 +27,7 @@ enum DeckActionKind: String, Codable, CaseIterable, Identifiable {
         case .shell: return "Shell Command"
         case .volume: return "Set Volume"
         case .media: return "Media Key"
+        case .page: return "Switch Page"
         }
     }
     var hint: String {
@@ -38,6 +40,7 @@ enum DeckActionKind: String, Codable, CaseIterable, Identifiable {
         case .shell: return "Runs in zsh, e.g. open ~/Downloads"
         case .volume: return "0–100"
         case .media: return "playpause, next, or previous"
+        case .page: return "Page name or 1-based number to switch to."
         }
     }
 }
@@ -186,6 +189,24 @@ enum DeckRunner {
             case "next", "forward":      mediaKey(17)
             case "previous", "prev", "back", "backward": mediaKey(18)
             default:                     mediaKey(16)   // play/pause
+            }
+        case .page:
+            switchPage(a.value)
+        }
+    }
+
+    /// Switch the deck to another page by 1-based number or by name.
+    static func switchPage(_ value: String) {
+        let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        DispatchQueue.main.async {
+            let pages = DeckStore.shared.layout.pages
+            guard !pages.isEmpty else { return }
+            if let n = Int(v), n >= 1, n <= pages.count {
+                DeckStore.shared.currentPage = n - 1
+            } else if let i = pages.firstIndex(where: {
+                $0.name.caseInsensitiveCompare(v) == .orderedSame
+            }) {
+                DeckStore.shared.currentPage = i
             }
         }
     }

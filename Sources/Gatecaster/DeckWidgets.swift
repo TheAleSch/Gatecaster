@@ -161,6 +161,7 @@ func widgetMinSpan(_ w: DeckWidget) -> (w: Int, h: Int) {
     case "cpu":     return (1, 1)
     case "ram":     return (2, 1)
     case "emoji":   return (3, 1)
+    case "timer":   return (2, 2)
     default:
         if let id = w.extensionId, let m = WidgetRegistry.shared.manifest(id: id) {
             return (max(1, m.minW ?? 2), max(1, m.minH ?? 1))
@@ -180,6 +181,7 @@ func widgetDefaultSpan(_ kind: String) -> (w: Int, h: Int) {
     case "cpu":     return (1, 1)
     case "ram":     return (2, 2)
     case "emoji":   return (4, 3)
+    case "timer":   return (2, 2)
     default:
         let id = kind.hasPrefix("ext:") ? String(kind.dropFirst(4)) : kind
         if let m = WidgetRegistry.shared.manifest(id: id) {
@@ -306,10 +308,11 @@ struct WidgetTile: View {
         case "cpu": CPUWidget()
         case "ram": RamWidget()
         case "emoji": EmojiWidget()
+        case "timer": TimerWidget(config: $widget.config)
         default:
             if let id = widget.extensionId,
                let m = WidgetRegistry.shared.manifest(id: id) {
-                ExtensionWidget(manifest: m)
+                ExtensionWidget(manifest: m, config: $widget.config)
             } else {
                 MissingWidget(id: widget.extensionId ?? widget.kind)
             }
@@ -442,6 +445,7 @@ private struct VolumeWidget: View {
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0)
                     .onChanged { g in
+                        guard h > 0 else { return }   // avoid NaN → Int(NaN) crash
                         volume = max(0, min(100, 100 * (1 - g.location.y / h)))
                         if Date().timeIntervalSince(lastSent) > 0.1 {
                             lastSent = Date(); DeckRunner.setVolume(Int(volume))
@@ -482,9 +486,13 @@ private struct MediaWidget: View {
 /// Third-party: declarative tile driven by a manifest + optional refresh poll.
 private struct ExtensionWidget: View {
     let manifest: WidgetManifest
+    @Binding var config: [String: String]       // persists toggle/multi-state across redraws
     @StateObject private var data = WidgetDataSource()
-    @State private var on: Set<Int> = []        // toggle-button on/off state
-    @State private var stateIdx: [Int: Int] = [:]   // multi-state button index
+
+    private func isOn(_ i: Int) -> Bool { config["on.\(i)"] == "1" }
+    private func setOn(_ i: Int, _ v: Bool) { config["on.\(i)"] = v ? "1" : nil }
+    private func stateIndex(_ i: Int) -> Int { Int(config["st.\(i)"] ?? "") ?? 0 }
+    private func setStateIndex(_ i: Int, _ v: Int) { config["st.\(i)"] = v == 0 ? nil : String(v) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -504,8 +512,8 @@ private struct ExtensionWidget: View {
                 }
             }
             if let buttons = manifest.buttons, !buttons.isEmpty {
-                // Wrap into a grid of compact chips — a single HStack squished
-                // many buttons into tall slivers with vertically-broken labels.
+                // Native ScrollView; the engine drives it with scroll-wheel
+                // events so a tall pack (e.g. Figma's shortcuts) scrolls.
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 6)],
                               spacing: 6) {
@@ -514,6 +522,7 @@ private struct ExtensionWidget: View {
                         }
                     }
                 }
+                .scrollIndicators(.hidden)
             }
         }
         .padding(10)
@@ -529,24 +538,24 @@ private struct ExtensionWidget: View {
         let label: String?
         let highlighted: Bool
         if let states = b.states, !states.isEmpty {
-            let i = stateIdx[index] ?? 0
+            let i = min(stateIndex(index), states.count - 1)
             symbol = states[i].symbol ?? b.symbol
             label = states[i].label ?? b.label
             highlighted = i != 0
         } else {
-            let isOn = on.contains(index)
-            symbol = (isOn ? b.altSymbol : nil) ?? b.symbol
-            label = (isOn ? b.altLabel : nil) ?? b.label
-            highlighted = isOn
+            let on = isOn(index)
+            symbol = (on ? b.altSymbol : nil) ?? b.symbol
+            label = (on ? b.altLabel : nil) ?? b.label
+            highlighted = on
         }
         return Button {
             if let states = b.states, !states.isEmpty {
-                let i = stateIdx[index] ?? 0
+                let i = min(stateIndex(index), states.count - 1)
                 DeckRunner.run(states[i].action)
-                stateIdx[index] = (i + 1) % states.count
+                setStateIndex(index, (i + 1) % states.count)
             } else if b.toggle == true {
-                if on.contains(index) { on.remove(index); DeckRunner.run(b.actionAlt ?? b.action) }
-                else { on.insert(index); DeckRunner.run(b.action) }
+                if isOn(index) { setOn(index, false); DeckRunner.run(b.actionAlt ?? b.action) }
+                else { setOn(index, true); DeckRunner.run(b.action) }
             } else {
                 DeckRunner.run(b.action)
             }
@@ -1046,6 +1055,185 @@ private func shell(_ exe: String, _ args: [String]) -> String {
     return String(data: data, encoding: .utf8) ?? ""
 }
 
+// MARK: - built-in: Countdown timer
+
+/// A countdown timer styled after the iOS dial. The iOS clock sets the time by
+/// dragging a knob around the ring — but on the deck a one-finger drag is routed
+/// to engine scrolling, so dragging a knob would fight the scroll engine. Instead
+/// this uses **tap controls**: preset chips, ±1:00 / ±0:10 steppers, and a
+/// start/pause + reset pair. The ring is a live progress indicator, not a drag
+/// target. The configured duration persists in the widget config; the running
+/// state is transient (resets when the deck reloads), which matches how a kitchen
+/// timer behaves and keeps state simple.
+private struct TimerWidget: View {
+    @Binding var config: [String: String]
+
+    // Total configured duration (seconds) and remaining time while running.
+    @State private var total: Int = 300
+    @State private var remaining: Int = 300
+    @State private var running = false
+    @State private var endDate: Date?       // wall-clock target, so it stays
+                                            // accurate even if ticks are missed
+    @State private var firedAt: Date?       // de-dupes the completion chime
+
+    private let tick = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
+    private let presets: [(label: String, secs: Int)] =
+        [("1m", 60), ("3m", 180), ("5m", 300), ("10m", 600), ("25m", 1500)]
+
+    var body: some View {
+        GeometryReader { geo in
+            let compact = geo.size.height < 150 || geo.size.width < 150
+            VStack(spacing: compact ? 6 : 10) {
+                dial(compact: compact)
+                if !compact { presetRow }
+                controlRow(compact: compact)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(compact ? 6 : 10)
+        }
+        .onAppear(perform: load)
+        .onReceive(tick) { _ in step() }
+    }
+
+    // MARK: ring + readout
+
+    private func dial(compact: Bool) -> some View {
+        let frac = total > 0 ? Double(remaining) / Double(total) : 0
+        let ring: CGFloat = compact ? 64 : 104
+        return ZStack {
+            Circle().stroke(Color.primary.opacity(0.12),
+                            style: StrokeStyle(lineWidth: compact ? 6 : 9))
+            Circle()
+                .trim(from: 0, to: CGFloat(max(0, min(1, frac))))
+                .stroke(ringTint,
+                        style: StrokeStyle(lineWidth: compact ? 6 : 9, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.linear(duration: 0.2), value: remaining)
+            Text(clock(remaining))
+                .font(.system(size: compact ? 18 : 30, weight: .semibold).monospacedDigit())
+                .foregroundColor(remaining == 0 ? .red : .primary)
+        }
+        .frame(width: ring, height: ring)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var ringTint: Color {
+        if remaining == 0 { return .red }
+        return remaining <= 10 && running ? .orange : .accentColor
+    }
+
+    // MARK: controls
+
+    private var presetRow: some View {
+        HStack(spacing: 6) {
+            ForEach(presets, id: \.secs) { p in
+                Button { setTotal(p.secs) } label: {
+                    Text(p.label)
+                        .font(.system(size: 12, weight: .medium))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Capsule().fill(total == p.secs
+                            ? Color.accentColor.opacity(0.25)
+                            : Color.primary.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func controlRow(compact: Bool) -> some View {
+        HStack(spacing: compact ? 8 : 12) {
+            if !running && remaining == total {
+                stepBtn("minus", compact) { adjust(-60) }
+                stepBtn("plus", compact) { adjust(+60) }
+            }
+            Button(action: toggle) {
+                Image(systemName: running ? "pause.fill" : "play.fill")
+                    .font(.system(size: compact ? 14 : 18, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: compact ? 32 : 40, height: compact ? 32 : 40)
+                    .background(Circle().fill(running ? Color.orange : Color.green))
+            }
+            .buttonStyle(.plain)
+            .disabled(remaining == 0)
+            Button(action: reset) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: compact ? 13 : 16, weight: .bold))
+                    .foregroundColor(.primary)
+                    .frame(width: compact ? 32 : 40, height: compact ? 32 : 40)
+                    .background(Circle().fill(Color.primary.opacity(0.10)))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func stepBtn(_ symbol: String, _ compact: Bool,
+                         _ act: @escaping () -> Void) -> some View {
+        Button(action: act) {
+            Image(systemName: symbol)
+                .font(.system(size: compact ? 12 : 14, weight: .bold))
+                .foregroundColor(.primary)
+                .frame(width: compact ? 28 : 34, height: compact ? 28 : 34)
+                .background(Circle().fill(Color.primary.opacity(0.10)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: logic
+
+    private func clock(_ s: Int) -> String {
+        let m = s / 60, sec = s % 60
+        if m >= 60 { return String(format: "%d:%02d:%02d", m / 60, m % 60, sec) }
+        return String(format: "%d:%02d", m, sec)
+    }
+
+    private func load() {
+        if let t = Int(config["seconds"] ?? ""), t > 0 { total = t }
+        remaining = total
+    }
+
+    private func setTotal(_ s: Int) {
+        total = s; remaining = s; running = false; endDate = nil; firedAt = nil
+        config["seconds"] = String(s)
+    }
+
+    private func adjust(_ delta: Int) {
+        let s = max(10, min(24 * 3600, total + delta))
+        setTotal(s)
+    }
+
+    private func toggle() {
+        if running {
+            running = false; endDate = nil
+            remaining = max(0, remaining)        // freeze where we are
+        } else {
+            guard remaining > 0 else { return }
+            running = true
+            endDate = Date().addingTimeInterval(Double(remaining))
+        }
+    }
+
+    private func reset() {
+        running = false; endDate = nil; firedAt = nil; remaining = total
+    }
+
+    private func step() {
+        guard running, let end = endDate else { return }
+        let left = Int(ceil(end.timeIntervalSinceNow))
+        if left <= 0 {
+            remaining = 0; running = false; endDate = nil
+            if firedAt == nil { firedAt = Date(); chime() }
+        } else {
+            remaining = left
+        }
+    }
+
+    /// Completion alert: the system "complete" sound + a screen flash via the
+    /// shared media-free path (just NSSound here to avoid stealing focus).
+    private func chime() {
+        NSSound(named: "Glass")?.play()
+    }
+}
+
 // MARK: - built-in: Emoji picker
 
 /// A scrollable emoji grid (macOS-style). Tapping types the emoji into the
@@ -1063,10 +1251,6 @@ private struct EmojiWidget: View {
          "💻 ⌨️ 🖥️ 🖱️ 📱 ⏰ 📅 📌 📎 ✏️ 📝 📚 💡 🔋 🔌 🎧 🎵 📷 🎥 🔍 🔒 🔑 🛠️ ⚙️ 🚀 ☕️ 🍕 🍔 🎮 🏆".split(separator: " ").map(String.init)),
     ]
 
-    @State private var offset: CGFloat = 0       // drag-scroll offset
-    @State private var startOffset: CGFloat = 0
-    @State private var contentH: CGFloat = 0
-
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // Segmented control (icons).
@@ -1080,34 +1264,18 @@ private struct EmojiWidget: View {
                             .fill(sel ? Color.accentColor : Color.clear))
                         .foregroundColor(sel ? .white : .secondary)
                         .contentShape(Rectangle())
-                        .onTapGesture { category = i; offset = 0; startOffset = 0 }
+                        .onTapGesture { category = i }
                 }
             }
             .padding(3)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.15)))
             .padding(.horizontal, 8).padding(.top, 6)
 
-            // Drag-to-scroll grid (macOS ScrollView doesn't scroll on click-drag,
-            // and on the touchscreen taps arrive as mouse drags). The visible
-            // window is geo-sized and clipped; the content is offset within it.
-            GeometryReader { geo in
-                grid
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: EmojiHeightKey.self, value: g.size.height)
-                    })
-                    .offset(y: offset)
-                    .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
-                    .clipped()
-                    .contentShape(Rectangle())
-                    .highPriorityGesture(
-                        DragGesture(minimumDistance: 4)
-                            .onChanged { v in
-                                let minOff = min(0, geo.size.height - contentH)
-                                offset = max(minOff, min(0, startOffset + v.translation.height))
-                            }
-                            .onEnded { _ in startOffset = offset })
-                    .onPreferenceChange(EmojiHeightKey.self) { contentH = $0 }
-            }
+            // Native ScrollView — the engine drives it with synthesized
+            // scroll-wheel events (see Engine.deckScrollAt). Indicators hidden
+            // for a clean, iOS-like touch look.
+            ScrollView { grid }.id(category)
+                .scrollIndicators(.hidden)
         }
     }
 
@@ -1140,7 +1308,3 @@ private struct EmojiWidget: View {
     }
 }
 
-private struct EmojiHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}

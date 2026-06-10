@@ -27,8 +27,10 @@ struct DeckView: View {
     var onHide: () -> Void
 
     @State private var draggingID: UUID?
+    @State private var showSettings = false
 
     private var pageIndex: Int { min(store.currentPage, store.layout.pages.count - 1) }
+    private var theme: DeckTheme { DeckTheme.theme(settings.deckTheme) }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -39,22 +41,30 @@ struct DeckView: View {
         }
         .padding(.top, 4)
         .background(deckBackground)
+        .environment(\.colorScheme, theme.scheme)   // flip system colors per theme
+        .sheet(isPresented: $showSettings) {
+            DeckSettingsView(settings: settings) { showSettings = false }
+        }
     }
 
-    /// Deck panel background: blur (live glass), opaque (flat fill), or clear
-    /// (transparent — just a hairline). Set via the deck ⋯ menu.
+    /// Deck panel background, driven by the selected theme + transparency.
     @ViewBuilder private var deckBackground: some View {
-        switch settings.deckBackground {
-        case "opaque":
+        let op = theme.forcesOpaque ? 1.0 : settings.deckOpacity
+        switch theme.background {
+        case .blur:
+            Color.clear.gcActiveBlur(cornerRadius: 16)
+        case .solid(let hex):
             RoundedRectangle(cornerRadius: 16)
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(settings.deckOpacity))
+                .fill(Color(hex: hex).opacity(op))
                 .overlay(RoundedRectangle(cornerRadius: 16)
                     .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
-        case "clear":
-            RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-        default:
-            Color.clear.gcActiveBlur(cornerRadius: 16)
+        case .gradient(let stops):
+            ZStack {
+                Color.clear.gcActiveBlur(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(LinearGradient(colors: stops.map { Color(hex: $0).opacity(op) },
+                                         startPoint: .top, endPoint: .bottom))
+            }
         }
     }
 
@@ -203,9 +213,13 @@ struct DeckView: View {
             } }
             return true
         }
-        func place(_ w: Int, _ h: Int) -> (Int, Int) {
+        func place(_ wIn: Int, _ hIn: Int) -> (Int, Int) {
+            // Clamp to the grid so an oversized span can never make `isFree`
+            // always-false and spin the loop forever (UI hang).
+            let w = max(1, min(wIn, columns))
+            let h = max(1, hIn)
             var r = 0
-            while true {
+            while r < 4096 {                       // hard safety cap
                 for c in 0...max(0, columns - w) where isFree(r, c, w, h) {
                     for dr in 0..<h { for dc in 0..<w {
                         occupied.insert((r + dr) * columns + c + dc)
@@ -214,6 +228,7 @@ struct DeckView: View {
                 }
                 r += 1
             }
+            return (0, 0)
         }
         var slots: [GridSlot] = []
         let page = store.layout.pages[pageIndex]
@@ -266,8 +281,10 @@ struct DeckView: View {
 
     private var settingsMenu: some View {
         Menu {
-            Button("Import Layout…") { importLayout() }
-            Button("Export Layout…") { exportLayout() }
+            Button("Deck Settings…") { showSettings = true }
+            Divider()
+            Button("Import Page / Layout…") { importLayout() }
+            Button("Export Page / Layout…") { exportLayout() }
             Divider()
             Button("Add Page") {
                 store.layout.pages.append(DeckPage(name: "Page \(store.layout.pages.count + 1)"))
@@ -287,13 +304,6 @@ struct DeckView: View {
                 Button("Medium") { settings.deckCellSize = 104 }
                 Button("Large") { settings.deckCellSize = 128 }
             }
-            Menu("Background") {
-                Button("Blur") { settings.deckBackground = "blur" }
-                Button("Opaque") { settings.deckBackground = "opaque" }
-                Button("Transparent") { settings.deckBackground = "clear" }
-            }
-            // Columns are derived from the panel size + block size — resize the
-            // panel (corner bean) to get more grid space.
         } label: {
             Image(systemName: "ellipsis.circle").font(.system(size: 24))
                 .frame(width: 36, height: 36).contentShape(Rectangle())
@@ -433,6 +443,7 @@ private struct AddCell: View {
                 pick("CPU load", "cpu", "cpu")
                 pick("RAM", "memorychip", "ram")
                 pick("Emoji picker", "face.smiling", "emoji")
+                pick("Timer", "timer", "timer")
                 if !extensions.isEmpty {
                     Divider()
                     ForEach(extensions) { m in
@@ -478,8 +489,14 @@ final class KeyRecorder {
         stop()
         self.onCapture = onCapture
         let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
-        let cb: CGEventTapCallBack = { _, _, event, userInfo in
+        let cb: CGEventTapCallBack = { _, type, event, userInfo in
             let me = Unmanaged<KeyRecorder>.fromOpaque(userInfo!).takeUnretainedValue()
+            // The OS disables a tap after a timeout / on user input — re-enable
+            // it, otherwise recording silently dies after the first hiccup.
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                if let t = me.tap { CGEvent.tapEnable(tap: t, enable: true) }
+                return Unmanaged.passUnretained(event)
+            }
             return me.handle(event)
         }
         guard let tap = CGEvent.tapCreate(

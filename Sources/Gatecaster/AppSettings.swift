@@ -113,8 +113,9 @@ final class AppSettings: ObservableObject {
     @Published var showDeck = false            // Stream Deck-style control surface (v3 PoC)
     @Published var deckCellSize = 104.0        // deck grid block size (pt); bigger = chunkier tiles
     @Published var panelFrames: [String: String] = [:]   // saved frames per panel (keyboard/trackpad/deck/floating)
-    @Published var deckBackground = "blur"     // deck panel background: blur | opaque | clear
-    @Published var deckOpacity = 0.9           // opaque-mode fill opacity
+    @Published var deckBackground = "blur"     // legacy; superseded by deckTheme
+    @Published var deckOpacity = 0.9           // panel transparency (0.3–1.0)
+    @Published var deckTheme = "midnight"      // deck visual theme (see DeckTheme)
     @Published var panelBlur = true            // live glass blur behind panels; off = flat translucent (cheaper)
     @Published var trackpadGain = 1.5          // virtual trackpad cursor sensitivity
 
@@ -173,6 +174,7 @@ final class AppSettings: ObservableObject {
         var panelFrames: [String: String]?
         var deckBackground: String?
         var deckOpacity: Double?
+        var deckTheme: String?
     }
 
     static let url = FileManager.default.homeDirectoryForCurrentUser
@@ -215,7 +217,7 @@ final class AppSettings: ObservableObject {
                  panelBlur: panelBlur, keyPressFeedback: keyPressFeedback,
                  keyPopup: keyPopup, deckCellSize: deckCellSize,
                  panelFrames: panelFrames, deckBackground: deckBackground,
-                 deckOpacity: deckOpacity)
+                 deckOpacity: deckOpacity, deckTheme: deckTheme)
     }
 
     private func apply(_ s: Snapshot) {
@@ -260,6 +262,7 @@ final class AppSettings: ObservableObject {
         panelFrames = s.panelFrames ?? [:]
         deckBackground = s.deckBackground ?? "blur"
         deckOpacity = s.deckOpacity ?? 0.9
+        deckTheme = s.deckTheme ?? "midnight"
     }
 
     func save() {
@@ -296,5 +299,6 @@ final class AppSettings: ObservableObject {
         palmRejection: true, palmPanelGuard: true, palmClusterPts: 56,
         showDeck: false, panelBlur: true,
         keyPressFeedback: true, keyPopup: true, deckCellSize: 104,
-        panelFrames: [:], deckBackground: "blur", deckOpacity: 0.9)
+        panelFrames: [:], deckBackground: "blur", deckOpacity: 0.9,
+        deckTheme: "midnight")
 }

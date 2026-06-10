@@ -93,6 +93,7 @@ the Deck's own buttons use:
 | `shell`     | `"open ~/Music"`             | run a shell command |
 | `volume`    | `"40"`                       | set output volume (0–100) |
 | `media`     | `"playpause"`                | media key (also `next`/`previous`) |
+| `page`      | `"2"` or `"Streaming"`       | jump the deck to another page (number or name) |
 
 Add three media buttons:
 

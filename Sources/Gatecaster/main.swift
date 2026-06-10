@@ -69,6 +69,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             self.draggedPanel = nil
         }
         engine.trackpadRect = { [weak self] in self?.trackpadActiveRect() }
+        engine.deckScrollAt = { [weak self] cg in self?.deckScrollRegion(cg) ?? false }
         engine.onShowKeyboard = { [weak self] in DispatchQueue.main.async { self?.toggleKeyboard() } }
         engine.onNotificationCenter = { [weak self] in
             DispatchQueue.main.async { self?.openNotificationCenter() }
@@ -586,6 +587,20 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func hideDeck() { deckPanel?.orderOut(nil); deckPanel = nil }
+
+    /// True when a one-finger drag at `cg` (CG, top-left) is over the deck's
+    /// content area (below the header) and the deck is NOT in edit mode — those
+    /// drags should scroll a widget's native ScrollView, not move the cursor.
+    /// In edit mode interior drags stay mouse-drags (resize / reorder).
+    private func deckScrollRegion(_ cg: CGPoint) -> Bool {
+        guard let panel = deckPanel, !DeckStore.shared.editing else { return false }
+        let flip = NSScreen.screens.first?.frame.maxY ?? 0
+        let f = panel.frame
+        let header: CGFloat = 50
+        let region = CGRect(x: f.minX, y: (flip - f.maxY) + header,
+                            width: f.width, height: max(0, f.height - header))
+        return region.contains(cg)
+    }
 
     /// Collapsed trackpad: a thin pull tab on the right edge (its active surface
     /// becomes empty automatically, so no touches are intercepted while collapsed).

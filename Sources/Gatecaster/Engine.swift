@@ -44,6 +44,13 @@ final class Engine {
     var onPanelDragMoved: ((CGPoint) -> Void)?
     var onPanelDragEnded: (() -> Void)?
 
+    // True when a one-finger drag starting at this point should SCROLL a deck
+    // widget (native ScrollView) rather than move the cursor. We then emit real
+    // scroll-wheel events (the `.fscroll` path) under the cursor — SwiftUI
+    // gestures don't receive our synthetic drags on a non-key panel, so the
+    // engine drives scrolling itself.
+    var deckScrollAt: ((CGPoint) -> Bool)?
+
     // Virtual trackpad: CG rect of the pad's active surface (nil when hidden).
     // Touches that START inside it act like a physical trackpad: relative cursor
     // movement, tap = click, two-finger = scroll (with inertia), 2-finger tap =
@@ -483,10 +490,16 @@ final class Engine {
                 if overPanel, onPanelDragBegan?(pStart) == true {
                     mode = .panelDrag; preTouchPos = nil
                     onPanelDragMoved?(p)
+                } else if overPanel, deckScrollAt?(pStart) == true {
+                    // Scrollable deck widget: drive a native ScrollView with real
+                    // scroll-wheel events. Taps still go through the click path,
+                    // so buttons keep working.
+                    mode = .fscroll; scrollSign = s.scrollSign
+                    sacc = (0, 0); phaseOpen = false
+                    emitScroll(rawDy: p.y - pLast.y, rawDx: p.x - pLast.x)
                 } else if overPanel {
-                    // Interior of one of OUR panels (deck slider, scroll views):
-                    // a real mouse drag so SwiftUI controls track the finger —
-                    // NOT iPad-scroll, which would scroll instead of dragging.
+                    // Interior of one of OUR panels (deck slider, etc.): a real
+                    // mouse drag so SwiftUI controls track the finger.
                     mode = .dragging; preTouchPos = nil
                     Pointer.leftDown(pStart); Pointer.leftDrag(p)
                 } else if s.ipadMode {
