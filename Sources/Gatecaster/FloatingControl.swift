@@ -22,6 +22,7 @@ struct FloatingControlView: View {
                     Image(systemName: "chevron.right.2").font(.system(size: 13, weight: .bold))
                 }
                 .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
+                .accessibilityLabel("Collapse launcher")
             }
             .padding(.horizontal, 12).padding(.top, 8)
 
@@ -73,5 +74,6 @@ struct FloatingTabView: View {
         }
         .buttonStyle(GCPressStyle())
         .foregroundColor(.primary)
+        .accessibilityLabel("Expand launcher")
     }
 }

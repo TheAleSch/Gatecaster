@@ -401,13 +401,14 @@ struct WidgetTile: View {
 
     private var editControls: some View {
         HStack(spacing: 4) {
-            iconBtn("gearshape.fill", tint: .black) { showConfig = true }
-            iconBtn("trash.fill", tint: .red) { onDelete() }
+            iconBtn("gearshape.fill", tint: .black, label: "Widget settings") { showConfig = true }
+            iconBtn("trash.fill", tint: .red, label: "Delete widget") { onDelete() }
         }
         .padding(4)
     }
 
-    private func iconBtn(_ symbol: String, tint: Color, _ act: @escaping () -> Void) -> some View {
+    private func iconBtn(_ symbol: String, tint: Color, label: String,
+                         _ act: @escaping () -> Void) -> some View {
         Button(action: act) {
             Image(systemName: symbol).font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.white).frame(width: 22, height: 22)
@@ -415,6 +416,7 @@ struct WidgetTile: View {
                     ? Color.red.opacity(0.85) : Color.black.opacity(0.5)))
         }
         .buttonStyle(GCPressStyle())
+        .accessibilityLabel(label)
     }
 
     /// Drag to resize in whole cells. Updates only a PREVIEW during the drag

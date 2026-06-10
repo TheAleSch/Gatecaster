@@ -181,6 +181,7 @@ struct KeyboardTabView: View {
         }
         .buttonStyle(GCPressStyle())
         .foregroundColor(.primary)
+        .accessibilityLabel("Show keyboard")
     }
 }
 
@@ -280,6 +281,7 @@ struct KeyboardView: View {
                         .frame(width: 40, height: 36).contentShape(Rectangle())
                 }
                 .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
+                .accessibilityLabel("Hide keyboard")
             }
             .padding(.horizontal, 6).padding(.top, 4)
             .background(TitleBarDrag())   // mouse: drag panel by title bar only

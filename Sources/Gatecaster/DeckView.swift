@@ -391,16 +391,19 @@ struct DeckView: View {
             }
             .buttonStyle(GCPressStyle())
             .foregroundColor(store.editing ? .accentColor : .secondary)
+            .accessibilityLabel(store.editing ? "Done editing" : "Edit deck")
             settingsMenu
             Button { showSettings = true } label: {
                 headerIcon("gearshape")
             }
             .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
+            .accessibilityLabel("Deck settings")
             if !store.fullScreen { ResizeBean() }   // nothing to resize at full screen
             Button(action: onHide) {
                 headerIcon("chevron.down")
             }
             .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
+            .accessibilityLabel("Hide deck")
         }
         .padding(.horizontal, 6)
         }
@@ -446,6 +449,7 @@ struct DeckView: View {
         .controlSize(.large)
         .frame(width: 36, height: 36)
         .foregroundColor(.secondary)
+        .accessibilityLabel("Deck menu")
     }
 
     private var pageBar: some View {
@@ -554,6 +558,7 @@ private struct AddCell: View {
                 .contentShape(RoundedRectangle(cornerRadius: GC.Radius.tile))
         }
         .buttonStyle(GCPressStyle())
+        .accessibilityLabel("Add button or widget")
         .popover(isPresented: $show, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Add").font(.system(size: 12, weight: .bold)).foregroundColor(.secondary)
@@ -737,6 +742,7 @@ private struct DeckButtonView: View {
                 }
                 .buttonStyle(GCPressStyle())
                 .padding(4)
+                .accessibilityLabel("Delete button")
             }
         }
         .aspectRatio(1, contentMode: .fit)
