@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Shared design tokens. Every UI surface (Settings, keyboard, trackpad,
 /// launcher, Deck, overlays) picks from these instead of inventing its own
@@ -38,5 +39,20 @@ struct GCPressStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.6 : 1.0)
             .animation(.spring(response: 0.18, dampingFraction: 0.6),
                        value: configuration.isPressed)
+    }
+}
+
+extension View {
+    /// Pin a subtree to the live SYSTEM appearance. The Deck forces
+    /// `colorScheme` to match its theme, and SwiftUI leaks that override into
+    /// popover *content* — but a macOS popover's bubble chrome always follows
+    /// the system appearance, so a dark-themed deck on a light Mac rendered
+    /// dark controls (black field, pale text) on a light bubble: unreadable.
+    /// Resetting popover content to the system scheme makes chrome and content
+    /// agree again, in either mode.
+    func gcSystemColorScheme() -> some View {
+        let dark = NSApp.effectiveAppearance
+            .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return environment(\.colorScheme, dark ? .dark : .light)
     }
 }

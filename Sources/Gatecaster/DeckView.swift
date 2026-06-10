@@ -568,6 +568,7 @@ private struct PageChip: View {
                 Button("Save") { rename(draft); showRename = false }
             }
             .padding(10)
+            .gcSystemColorScheme()   // don't inherit the deck's forced theme scheme
         }
     }
 }
@@ -624,6 +625,7 @@ private struct AddCell: View {
                     .buttonStyle(.plain).font(.system(size: 12))
             }
             .padding(12).frame(width: 220)
+            .gcSystemColorScheme()   // don't inherit the deck's forced theme scheme
         }
     }
 
@@ -796,6 +798,7 @@ private struct DeckButtonView: View {
                 showEditor = false
                 onDelete()
             })
+            .gcSystemColorScheme()   // don't inherit the deck's forced theme scheme
         }
     }
 

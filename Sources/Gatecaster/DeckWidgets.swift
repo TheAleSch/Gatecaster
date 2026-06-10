@@ -376,7 +376,10 @@ struct WidgetTile: View {
             .overlay(alignment: .topLeading) { if previewW != nil { resizeGhost } }
             .overlay(alignment: .topTrailing) { if editing { editControls } }
             .overlay(alignment: .bottomTrailing) { if editing { resizeHandle } }
-            .popover(isPresented: $showConfig) { WidgetConfigEditor(widget: $widget) }
+            .popover(isPresented: $showConfig) {
+                WidgetConfigEditor(widget: $widget)
+                    .gcSystemColorScheme()   // don't inherit the deck's forced theme scheme
+            }
     }
 
     /// Snapped target outline drawn during a resize drag (anchored top-left,
