@@ -15,6 +15,10 @@ struct DeckWidget: Codable, Identifiable, Hashable {
     var spanW = 2                        // width in grid cells
     var spanH = 2                        // height in grid cells
     var config: [String: String] = [:]  // per-instance settings (extension fields)
+    // Explicit grid placement (cell coordinates). nil = auto first-fit. See the
+    // matching note on DeckButton — integers so they survive a Block-Size change.
+    var gridCol: Int?
+    var gridRow: Int?
 
     var isExtension: Bool { kind.hasPrefix("ext:") }
     var extensionId: String? { isExtension ? String(kind.dropFirst(4)) : nil }
@@ -191,6 +195,21 @@ func widgetDefaultSpan(_ kind: String) -> (w: Int, h: Int) {
     }
 }
 
+// MARK: - drag regions (volume bars opt OUT of the deck's scroll routing)
+
+/// Panel-local frames (top-left points, from SwiftUI `.global`) of on-screen
+/// volume bars. The deck routes one-finger drags below its header to a native
+/// ScrollView by default (the engine drives the scroll, since SwiftUI gestures
+/// don't receive our synthetic drags on a non-key panel). The volume bar is the
+/// one widget that needs a real mouse DRAG instead, so it publishes its frame
+/// here and `AppDelegate.deckScrollRegion` excludes these rects — making the
+/// engine send a leftDown/leftDrag the bar's gesture can track. Keyed by widget
+/// id; entries are removed on disappear. Main-thread only (engine callbacks and
+/// SwiftUI both touch it on main).
+enum DeckDragRegions {
+    static var volumeRects: [UUID: CGRect] = [:]
+}
+
 // MARK: - widget tile views
 
 /// Renders one widget; the grid sizes it to its span, so the tile fills its
@@ -218,6 +237,11 @@ struct WidgetTile: View {
 
     var body: some View {
         content
+            // In edit mode the tile is a drag/resize target, so its live controls
+            // (volume bar, media keys, timer, emoji, extension chips) go inert —
+            // a tap there must not fire an action while you're arranging the deck.
+            // The gear/trash/resize overlays are added AFTER this, so they stay live.
+            .allowsHitTesting(!editing)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(RoundedRectangle(cornerRadius: 14)
                 .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6)))
@@ -302,7 +326,7 @@ struct WidgetTile: View {
                             .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
                             .filter { !$0.isEmpty })
         case "media": MediaWidget()
-        case "volume": VolumeWidget()
+        case "volume": VolumeWidget(id: widget.id)
         case "claude": ClaudeUsageWidget(config: $widget.config)
         case "battery": BatteryWidget()
         case "cpu": CPUWidget()
@@ -428,6 +452,7 @@ private struct ClockWidget: View {
 /// Built-in: output volume. Drag or tap anywhere on the bar to set; tap-to-set
 /// works even with click-only synthetic touches. Throttled to ~10 Hz.
 private struct VolumeWidget: View {
+    let id: UUID
     @State private var volume = 50.0
     @State private var lastSent = Date.distantPast
 
@@ -443,7 +468,19 @@ private struct VolumeWidget: View {
                         .frame(height: max(8, h * volume / 100))
                 }
                 .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0)
+                // Publish the bar's panel-local frame so the engine excludes it
+                // from deck scroll routing and instead sends a real mouse drag —
+                // without this, a touch-drag here scrolls (the bar never updates).
+                .background(GeometryReader { g in
+                    Color.clear
+                        .onAppear { DeckDragRegions.volumeRects[id] = g.frame(in: .global) }
+                        .onChange(of: g.frame(in: .global)) { f in
+                            DeckDragRegions.volumeRects[id] = f
+                        }
+                })
+                // highPriorityGesture: non-activating panel gesture disambiguation
+                // drops plain .gesture() — this ensures the volume bar always wins.
+                .highPriorityGesture(DragGesture(minimumDistance: 0)
                     .onChanged { g in
                         guard h > 0 else { return }   // avoid NaN → Int(NaN) crash
                         volume = max(0, min(100, 100 * (1 - g.location.y / h)))
@@ -457,6 +494,7 @@ private struct VolumeWidget: View {
                 .foregroundColor(.secondary)
         }
         .padding(8)
+        .onDisappear { DeckDragRegions.volumeRects[id] = nil }
     }
 }
 

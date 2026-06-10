@@ -993,10 +993,14 @@ fidelity a future option could shell out to `ccusage --json` when installed.
 ## Deck layout: unified spanning grid + per-widget editing
 
 Buttons (1×1) and widgets (W×H) share one grid. `DeckView.packLayout` is a
-first-fit packer: it places each widget then each button at the first free
-slot (top-to-bottom, left-to-right) in a `columns`-wide grid, returning
-absolute (row,col) positions rendered in a `ZStack` with offsets. Buttons
-default to the neutral keycap color (empty `colorHex`); color is opt-in.
+first-fit packer over `DeckPage.resolvedOrder`: it places each item at the
+first free slot (top-to-bottom, left-to-right) in a `columns`-wide grid,
+returning absolute (row,col) positions rendered in a `ZStack` with offsets.
+In **manual** mode (`autoArrange == false`) an item with an explicit
+`gridCol`/`gridRow` is honored when that cell range is free and in-bounds, and
+everything else first-fits around it; in **Auto-Arrange** mode (default) the
+stored cells are ignored entirely → pure first-fit ("tidy"). Buttons default
+to the neutral keycap color (empty `colorHex`); color is opt-in.
 
 In edit mode each widget tile shows three controls: a **gear**
 (`WidgetConfigEditor` popover — per-kind settings), a **trash** (delete), and
@@ -1008,18 +1012,30 @@ The Claude usage widget reads its display mode + token limits from
 `widget.config` (`display` = tokens|percent|both, `limit5h`, `limitWeek`);
 percent requires a limit since local logs can't know the plan cap.
 
-## Deck: drag-reorder, min size, more built-in widgets
+## Deck: tile drag (two modes), min size, more built-in widgets
 
-- **Unified order**: `DeckPage.order` is one sequence over buttons + widgets
-  (`resolvedOrder` falls back to widgets-then-buttons for old layouts). The
-  packer iterates it, so dragging any tile (the `DraggableItem` modifier +
-  `ItemDrop` delegate) reorders both kinds together. Earlier tiles never move
-  when a later one resizes (order-stable); full free placement is task #44.
+- **Whole-tile drag.** In edit mode the entire tile body is draggable (a
+  `DragGesture` in the named `deckGrid` coordinate space; gated on `editing` so a
+  non-edit touch leaves the volume slider's own gesture free). The bottom-right
+  resize handle keeps `highPriorityGesture`, so grabbing the corner resizes and
+  beats the body drag; a tap still opens the editor. The drop is interpreted by
+  mode in `DeckView.handleDrop`:
+  - **Auto-Arrange ON** (default) → **reorder**: the drop snaps to the nearest
+    other tile's center and the dragged item takes its place in
+    `DeckPage.order`; the packer re-flows ("tidy"). `resolvedOrder` falls back
+    to widgets-then-buttons for old layouts.
+  - **Auto-Arrange OFF** → **absolute placement**: the drop snaps to the nearest
+    cell and is stored as the item's `gridCol`/`gridRow` (integers, so positions
+    survive a Block-Size change — the cell pitch can grow/shrink and the item
+    keeps the same logical cell).
+- **Menu**: deck ⋯ → `Auto-Arrange` toggle and `Tidy Up Now` (`DeckView.tidyUp`
+  clears every item's `gridCol`/`gridRow` on the page → instant reflow).
 - **Min size**: `widgetMinSpan` / `widgetDefaultSpan` give each kind a floor and
   a drop size; extensions declare `minW/minH/defaultW/defaultH` in the manifest.
   The resize handle clamps to the minimum.
-- **Edit grid**: in edit mode the grid fills the viewport with dashed cell
-  guides (plus spare rows) so there's visible empty space to resize/drag into.
+- **Edit grid**: in edit mode the grid fills the viewport with `AddCell` "+"
+  cells (dashed outline, plus spare rows) so there's visible empty space — and
+  an add affordance — to resize/drag into.
 - **Built-in widgets**: clock, volume, media, claude, **battery** (`pmset`),
   **cpu** (`host_statistics`). Media now uses real NX media keys, not F-keys.
   Most other widgets (OBS, Spotify, timers, multi-tz, GPU…) are intended as
@@ -1082,4 +1098,14 @@ scroll-wheel events (with phase + momentum) at the cursor. macOS delivers those
 to the `ScrollView` under the cursor — which scrolls natively, even though the
 panel isn't key. Widgets (emoji grid, extension chip grid) just use a plain
 `ScrollView`. Taps still go through the click path, so buttons keep working;
-edit-mode interior drags stay mouse-drags for resize/reorder.
+edit-mode interior drags stay mouse-drags for tile drag / resize.
+
+**Volume bars opt out.** A vertical volume bar needs a real *drag*, not a
+scroll. Each on-screen `VolumeWidget` publishes its panel-local frame to
+`DeckDragRegions.volumeRects` (keyed by widget id, cleared on disappear);
+`deckScrollRegion` maps those into screen space and returns `false` for a touch
+inside one. The engine then takes the interior `.dragging` path
+(`leftDown`+`leftDrag`), so the bar's `DragGesture` tracks the finger and sets
+the volume. Without this the whole content area scrolled and the bar never moved
+— `highPriorityGesture` on the bar couldn't help, because the engine never
+delivered a drag to begin with.

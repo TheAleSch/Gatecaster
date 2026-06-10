@@ -571,22 +571,37 @@ final class AppController: NSObject, NSApplicationDelegate {
         deckPanel = panel
     }
 
-    /// Toggle the deck between its saved size and filling the touch display.
+    /// Toggle the deck between its saved size and owning the full display.
+    /// Raises panel to .screenSaver level (above menu bar) so it physically covers all
+    /// system chrome — presentationOptions alone won't work because the panel is
+    /// nonactivating and macOS only honours those options for the frontmost app.
     @objc private func toggleDeckFullScreen() {
         guard let panel = deckPanel,
-              let sf = (nsScreen(for: selectedDisplay) ?? NSScreen.main)?.frame else { return }
+              let screen = nsScreen(for: selectedDisplay) ?? NSScreen.main else { return }
+        let sf = screen.frame
         let isFull = abs(panel.frame.width - sf.width) < 4 && abs(panel.frame.height - sf.height) < 4
         if isFull {
+            panel.level = .floating
+            NSApp.presentationOptions = []
             let r = savedFrame("deck") ?? NSRect(x: sf.minX + 60, y: sf.midY - 200,
                                                  width: 460, height: 420)
             panel.setFrame(r, display: true)
         } else {
-            saveFrame(panel)                 // remember the windowed size first
+            saveFrame(panel)
+            // .screenSaver level (1000) is above the menu bar (24) and Dock — the panel
+            // covers them rather than relying on the app being frontmost for presentationOptions.
+            panel.level = .screenSaver
+            NSApp.presentationOptions = [.hideMenuBar, .hideDock]
             panel.setFrame(sf, display: true)
         }
     }
 
-    private func hideDeck() { deckPanel?.orderOut(nil); deckPanel = nil }
+    private func hideDeck() {
+        deckPanel?.level = .floating
+        NSApp.presentationOptions = []
+        deckPanel?.orderOut(nil)
+        deckPanel = nil
+    }
 
     /// True when a one-finger drag at `cg` (CG, top-left) is over the deck's
     /// content area (below the header) and the deck is NOT in edit mode — those
@@ -599,7 +614,16 @@ final class AppController: NSObject, NSApplicationDelegate {
         let header: CGFloat = 50
         let region = CGRect(x: f.minX, y: (flip - f.maxY) + header,
                             width: f.width, height: max(0, f.height - header))
-        return region.contains(cg)
+        guard region.contains(cg) else { return false }
+        // Volume bars opt OUT of scroll routing: a drag there must reach the bar's
+        // SwiftUI gesture as a real mouse drag. Their frames are panel-local (top-
+        // left points from `.global`); map each into CG screen space and exclude.
+        for local in DeckDragRegions.volumeRects.values {
+            let cgRect = CGRect(x: f.minX + local.minX, y: (flip - f.maxY) + local.minY,
+                                width: local.width, height: local.height)
+            if cgRect.contains(cg) { return false }
+        }
+        return true
     }
 
     /// Collapsed trackpad: a thin pull tab on the right edge (its active surface
@@ -645,13 +669,14 @@ final class AppController: NSObject, NSApplicationDelegate {
         let view = FloatingControlView(settings: settings,
                                        onKeyboard: { [weak self] in self?.toggleKeyboard() },
                                        onTrackpad: { [weak self] in self?.toggleTrackpad() },
+                                       onDeck: { [weak self] in self?.settings.showDeck.toggle() },
                                        onSettings: { [weak self] in self?.openSettings() },
                                        onCollapse: { [weak self] in self?.collapseFloating() })
         let host = GlassHostingView(rootView: view)
-        host.frame = NSRect(x: 0, y: 0, width: 160, height: 160)
+        host.frame = NSRect(x: 0, y: 0, width: 160, height: 210)
         let sf = floatingScreenFrame()
         panel.contentView = host
-        setFrameAnimated(panel, NSRect(x: sf.maxX - 200, y: sf.midY - 80, width: 160, height: 160))
+        setFrameAnimated(panel, NSRect(x: sf.maxX - 200, y: sf.midY - 105, width: 160, height: 210))
     }
 
     private func collapseFloating() {

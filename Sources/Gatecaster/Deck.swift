@@ -56,6 +56,12 @@ struct DeckButton: Codable, Identifiable, Hashable {
     var symbol = "square.grid.2x2"   // SF Symbol name
     var colorHex = ""                // empty = neutral keycap (matches keyboard)
     var action = DeckAction()
+    // Explicit grid placement (cell coordinates). nil = auto first-fit by the
+    // packer. Set when the user drags a tile to a cell. Integers (not pixels) so
+    // positions survive a Block-Size change — the cell pitch can grow/shrink and
+    // the item still lands on the same logical cell.
+    var gridCol: Int?
+    var gridRow: Int?
 }
 
 struct DeckPage: Codable, Identifiable, Hashable {
@@ -82,6 +88,10 @@ struct DeckPage: Codable, Identifiable, Hashable {
 struct DeckLayout: Codable {
     var columns = 4
     var showVolumeSlider = true
+    // When true (default), tiles always auto-pack top-left ("tidy") and a drag
+    // REORDERS an item within the pack. When false, a drag places an item at an
+    // absolute cell (gridCol/gridRow), kept until moved again.
+    var autoArrange = true
     var pages: [DeckPage] = []
 }
 

@@ -108,6 +108,7 @@ Goal: feel it on the screen, validate the concept.
 {
   "columns": 4,
   "showVolumeSlider": true,
+  "autoArrange": true,
   "pages": [{
     "id": "…", "name": "Main",
     "buttons": [{
@@ -119,9 +120,12 @@ Goal: feel it on the screen, validate the concept.
 }
 ```
 
-`kind` ∈ `app | url | keystroke | shortcut | shell | volume | none`.
-Schema carries no version field yet; MVP adds `"schema": 1` before any
-breaking change. A page also carries `widgets` (see docs/EXTENSIONS.md).
+`kind` ∈ `app | url | keystroke | shortcut | shell | volume | media | page | none`.
+`autoArrange` (default `true`) keeps tiles auto-packed and maps a drag to
+reorder; set it `false` for manual placement, where each button/widget may carry
+optional `gridCol`/`gridRow` cell coordinates. Schema carries no version field
+yet; MVP adds `"schema": 1` before any breaking change. A page also carries
+`widgets` (see docs/EXTENSIONS.md).
 
 ## Cross-platform / Windows portability
 

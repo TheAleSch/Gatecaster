@@ -26,8 +26,11 @@ struct DeckView: View {
     @ObservedObject var settings: AppSettings
     var onHide: () -> Void
 
-    @State private var draggingID: UUID?
     @State private var showSettings = false
+    // Live pixel offset of a tile being dragged to a new cell (keyed by slot id).
+    // The model's gridCol/gridRow is only written on release, so the grid never
+    // reflows mid-drag — the tile tracks the finger, then snaps to a cell.
+    @State private var dragOffsets: [String: CGSize] = [:]
 
     private var pageIndex: Int { min(store.currentPage, store.layout.pages.count - 1) }
     private var theme: DeckTheme { DeckTheme.theme(settings.deckTheme) }
@@ -36,7 +39,7 @@ struct DeckView: View {
         VStack(spacing: 6) {
             header
             pageBar
-            packedGrid
+            activeGrid
                 .padding(.horizontal, 8).padding(.bottom, 8)
         }
         .padding(.top, 4)
@@ -75,16 +78,23 @@ struct DeckView: View {
     // adds more grid cells (more columns/rows) rather than enlarging the tiles.
     // The block size is user-set (Settings → deck menu → Block size).
     private let gridSpacing: CGFloat = 8
+    private static let gridSpace = "deckGrid"   // drag drop-point coordinate space
 
-    private var packedGrid: some View {
+    /// The deck's single grid. Items sit at their packed cell; an item with an
+    /// explicit (gridCol, gridRow) is honored, the rest first-fit around it. In
+    /// edit mode a top-left move handle drags a tile to a new cell (snapped on
+    /// release) — kept separate from the WidgetTile resize handle (bottom-right)
+    /// so the two gestures never fight.
+    private var activeGrid: some View {
         let spacing = gridSpacing
         let targetCell = CGFloat(settings.deckCellSize)
         return GeometryReader { geo in
             // Columns from width at the target cell size; cell snaps to fill width.
             let cols = max(2, Int((geo.size.width + spacing) / (targetCell + spacing)))
             let cell = (geo.size.width - spacing * CGFloat(cols - 1)) / CGFloat(cols)
+            let step = cell + spacing
             // Rows that fit the panel height (no scroll); edit mode fills the
-            // panel with empty guide cells so there's room to resize/drag into.
+            // panel with empty "+" cells so there's room to drag/resize into.
             let fitRows = max(1, Int((geo.size.height + spacing) / (cell + spacing)))
             let packed = packLayout(columns: cols)
             let gridRows = store.editing ? max(packed.rows, fitRows) : packed.rows
@@ -98,36 +108,121 @@ struct DeckView: View {
                         AddCell(extensions: WidgetRegistry.shared.manifests,
                                 onPick: addElement)
                             .frame(width: cell, height: cell)
-                            .offset(x: CGFloat(c) * (cell + spacing),
-                                    y: CGFloat(r) * (cell + spacing))
+                            .offset(x: CGFloat(c) * step, y: CGFloat(r) * step)
                     }
                 }
                 ForEach(packed.slots) { slot in
-                    tile(for: slot, cell: cell, step: cell + spacing, cols: cols)
-                        .frame(width: cell * CGFloat(slot.w) + spacing * CGFloat(slot.w - 1),
-                               height: cell * CGFloat(slot.h) + spacing * CGFloat(slot.h - 1))
-                        .offset(x: CGFloat(slot.col) * (cell + spacing),
-                                y: CGFloat(slot.row) * (cell + spacing))
+                    let tileW = cell * CGFloat(slot.w) + spacing * CGFloat(slot.w - 1)
+                    let tileH = cell * CGFloat(slot.h) + spacing * CGFloat(slot.h - 1)
+                    let pos = CGPoint(x: CGFloat(slot.col) * step, y: CGFloat(slot.row) * step)
+                    let liveOff = dragOffsets[slot.id] ?? .zero
+                    placedTile(slot: slot, cell: cell, step: step, cols: cols)
+                        .frame(width: tileW, height: tileH)
+                        .offset(x: pos.x + liveOff.width, y: pos.y + liveOff.height)
+                        // While dragging, ride above the other tiles; otherwise
+                        // animate cell-to-cell moves (re-pack on release).
+                        .zIndex(dragOffsets[slot.id] != nil ? 1 : 0)
                         .animation(.spring(response: 0.3, dampingFraction: 0.82),
                                    value: "\(slot.col),\(slot.row),\(slot.w),\(slot.h)")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .coordinateSpace(name: Self.gridSpace)   // drop points resolve here
         }
     }
 
-    /// (unused) Faint dashed cell outlines — kept for reference; empty cells now
-    /// render AddCell which provides the grid affordance.
-    private func gridGuides(cols: Int, rows: Int, cell: CGFloat, spacing: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(0..<(cols * max(1, rows)), id: \.self) { idx in
-                let r = idx / cols, c = idx % cols
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.secondary.opacity(0.18),
-                            style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    .frame(width: cell, height: cell)
-                    .offset(x: CGFloat(c) * (cell + spacing),
-                            y: CGFloat(r) * (cell + spacing))
+    /// One placed tile. In edit mode the whole body is draggable (gated here so a
+    /// non-edit touch never has a competing parent gesture — the volume slider's
+    /// own highPriorityGesture stays free). The WidgetTile resize handle uses
+    /// `highPriorityGesture`, so grabbing it resizes and beats this body drag.
+    @ViewBuilder
+    private func placedTile(slot: GridSlot, cell: CGFloat, step: CGFloat, cols: Int) -> some View {
+        if store.editing {
+            tile(for: slot, cell: cell, step: step, cols: cols)
+                .gesture(tileDrag(slot: slot, cell: cell, step: step, cols: cols))
+        } else {
+            tile(for: slot, cell: cell, step: step, cols: cols)
+        }
+    }
+
+    /// Drag a tile to move it. Live offset tracks the finger; on release the drop
+    /// is interpreted by mode:
+    ///  - Auto-Arrange ON  → REORDER (drop onto the nearest other tile, reflow).
+    ///  - Auto-Arrange OFF → absolute placement (snap to the nearest cell).
+    private func tileDrag(slot: GridSlot, cell: CGFloat, step: CGFloat, cols: Int) -> some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .named(Self.gridSpace))
+            .onChanged { v in dragOffsets[slot.id] = v.translation }
+            .onEnded { v in
+                dragOffsets.removeValue(forKey: slot.id)
+                handleDrop(slot: slot, drop: v.location, cell: cell, step: step, cols: cols)
+            }
+    }
+
+    /// Resolve a drop. `drop` is in the grid's coordinate space (top-left origin).
+    private func handleDrop(slot: GridSlot, drop: CGPoint, cell: CGFloat, step: CGFloat, cols: Int) {
+        guard cols > 0 else { return }
+        if store.layout.autoArrange {
+            // Reorder: find the nearest OTHER tile's center to the drop point and
+            // move the dragged item to its position in the unified order.
+            let packed = packLayout(columns: cols)
+            var best: (id: String, d: CGFloat)?
+            for s in packed.slots where s.id != slot.id {
+                let cx = (CGFloat(s.col) + CGFloat(s.w) / 2) * step
+                let cy = (CGFloat(s.row) + CGFloat(s.h) / 2) * step
+                let d = hypot(drop.x - cx, drop.y - cy)
+                if best == nil || d < best!.d { best = (s.id, d) }
+            }
+            if let target = best, let dragId = UUID(uuidString: slot.id),
+               let targetId = UUID(uuidString: target.id) {
+                reorder(dragId, targetId)
+            }
+        } else {
+            // Absolute: snap the drop (tile top-left ≈ drop minus half a cell) to
+            // the nearest cell, clamped so a wide/tall tile stays on-grid.
+            let nx = drop.x - cell / 2, ny = drop.y - cell / 2
+            let col = min(max(0, cols - slot.w), max(0, Int((nx / step).rounded())))
+            let row = max(0, Int((ny / step).rounded()))
+            setGridPos(slot: slot, col: col, row: row)
+        }
+    }
+
+    /// Move one item to another's position in the page's unified order; the packer
+    /// re-flows from the new order (used in Auto-Arrange mode).
+    private func reorder(_ dragId: UUID, _ targetId: UUID) {
+        guard dragId != targetId else { return }
+        var ids = store.layout.pages[pageIndex].resolvedOrder
+        guard let from = ids.firstIndex(of: dragId),
+              let to = ids.firstIndex(of: targetId) else { return }
+        ids.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        store.layout.pages[pageIndex].order = ids
+    }
+
+    /// Clear all explicit positions on the current page so everything reflows
+    /// top-left ("Tidy Up Now").
+    private func tidyUp() {
+        for i in store.layout.pages[pageIndex].buttons.indices {
+            store.layout.pages[pageIndex].buttons[i].gridCol = nil
+            store.layout.pages[pageIndex].buttons[i].gridRow = nil
+        }
+        for i in store.layout.pages[pageIndex].widgets.indices {
+            store.layout.pages[pageIndex].widgets[i].gridCol = nil
+            store.layout.pages[pageIndex].widgets[i].gridRow = nil
+        }
+    }
+
+    /// Persist an explicit cell position for the dragged item (the packer honors
+    /// it next layout pass; any displaced item first-fits around it).
+    private func setGridPos(slot: GridSlot, col: Int, row: Int) {
+        switch slot.kind {
+        case .button(let b):
+            if let i = store.layout.pages[pageIndex].buttons.firstIndex(where: { $0.id == b.id }) {
+                store.layout.pages[pageIndex].buttons[i].gridCol = col
+                store.layout.pages[pageIndex].buttons[i].gridRow = row
+            }
+        case .widget(let w):
+            if let i = store.layout.pages[pageIndex].widgets.firstIndex(where: { $0.id == w.id }) {
+                store.layout.pages[pageIndex].widgets[i].gridCol = col
+                store.layout.pages[pageIndex].widgets[i].gridRow = row
             }
         }
     }
@@ -140,13 +235,9 @@ struct DeckView: View {
             WidgetTile(widget: widgetBinding(w.id), editing: store.editing,
                        cell: cell, step: step, maxCols: cols,
                        minW: min(mn.w, cols), minH: mn.h, onDelete: { removeWidget(w) })
-                .modifier(DraggableItem(id: w.id, editing: store.editing,
-                                        draggingID: $draggingID, reorder: reorder))
         case .button(let btn):
             DeckButtonView(button: binding(for: btn), editing: store.editing,
                            onDelete: { delete(btn) })
-                .modifier(DraggableItem(id: btn.id, editing: store.editing,
-                                        draggingID: $draggingID, reorder: reorder))
         }
     }
 
@@ -200,36 +291,45 @@ struct DeckView: View {
         }
     }
 
-    /// Place items in the page's unified order into a `columns`-wide grid, each
-    /// at the first free spot (top-to-bottom, left-to-right). Returns slots,
-    /// row count, and the set of occupied cell keys (row*columns + col) so the
-    /// view can draw a "+" in every empty cell.
+    /// Place items in the page's unified order into a `columns`-wide grid. An item
+    /// with an explicit (gridCol, gridRow) is honored when that cell range is free
+    /// and in-bounds; everything else (and any item whose explicit cell collides)
+    /// first-fits at the next free spot. Returns slots, row count, and the set of
+    /// occupied cell keys (row*columns + col) so the view can draw a "+" in empties.
     private func packLayout(columns: Int) -> (slots: [GridSlot], rows: Int, occupied: Set<Int>) {
         var occupied = Set<Int>()                       // key = row*columns + col
         func isFree(_ r: Int, _ c: Int, _ w: Int, _ h: Int) -> Bool {
-            if c + w > columns { return false }
+            if r < 0 || c < 0 || c + w > columns { return false }
             for dr in 0..<h { for dc in 0..<w {
                 if occupied.contains((r + dr) * columns + c + dc) { return false }
             } }
             return true
         }
-        func place(_ wIn: Int, _ hIn: Int) -> (Int, Int) {
-            // Clamp to the grid so an oversized span can never make `isFree`
-            // always-false and spin the loop forever (UI hang).
-            let w = max(1, min(wIn, columns))
-            let h = max(1, hIn)
+        func mark(_ r: Int, _ c: Int, _ w: Int, _ h: Int) {
+            for dr in 0..<h { for dc in 0..<w { occupied.insert((r + dr) * columns + c + dc) } }
+        }
+        func firstFit(_ w: Int, _ h: Int) -> (Int, Int) {
             var r = 0
-            while r < 4096 {                       // hard safety cap
+            while r < 4096 {                       // hard safety cap (no infinite spin)
                 for c in 0...max(0, columns - w) where isFree(r, c, w, h) {
-                    for dr in 0..<h { for dc in 0..<w {
-                        occupied.insert((r + dr) * columns + c + dc)
-                    } }
-                    return (r, c)
+                    mark(r, c, w, h); return (r, c)
                 }
                 r += 1
             }
             return (0, 0)
         }
+        // Honor the stored cell if it fits and is free; else fall back to first-fit.
+        func place(col: Int?, row: Int?, _ wIn: Int, _ hIn: Int) -> (Int, Int) {
+            // Clamp span to the grid so an oversized item can't make isFree
+            // always-false and spin (or overflow a row of cells).
+            let w = max(1, min(wIn, columns))
+            let h = max(1, hIn)
+            if let c = col, let r = row, isFree(r, c, w, h) { mark(r, c, w, h); return (r, c) }
+            return firstFit(w, h)
+        }
+        // Auto-Arrange ignores stored cells entirely → pure first-fit ("tidy"),
+        // with drag mapped to REORDER. Manual mode honors each item's cell.
+        let honor = !store.layout.autoArrange
         var slots: [GridSlot] = []
         let page = store.layout.pages[pageIndex]
         let wById = Dictionary(page.widgets.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -237,11 +337,13 @@ struct DeckView: View {
         for id in page.resolvedOrder {
             if let wdg = wById[id] {
                 let w = min(max(1, wdg.spanW), columns), h = max(1, wdg.spanH)
-                let (r, c) = place(w, h)
+                let (r, c) = place(col: honor ? wdg.gridCol : nil,
+                                   row: honor ? wdg.gridRow : nil, w, h)
                 slots.append(GridSlot(id: id.uuidString, col: c, row: r, w: w, h: h,
                                       kind: .widget(wdg)))
             } else if let btn = bById[id] {
-                let (r, c) = place(1, 1)
+                let (r, c) = place(col: honor ? btn.gridCol : nil,
+                                   row: honor ? btn.gridRow : nil, 1, 1)
                 slots.append(GridSlot(id: id.uuidString, col: c, row: r, w: 1, h: 1,
                                       kind: .button(btn)))
             }
@@ -268,6 +370,11 @@ struct DeckView: View {
             .buttonStyle(.plain)
             .foregroundColor(store.editing ? .accentColor : .secondary)
             settingsMenu
+            Button { showSettings = true } label: {
+                Image(systemName: "gearshape").font(.system(size: 22))
+                    .frame(width: 36, height: 36).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundColor(.secondary)
             ResizeBean()
             Button(action: onHide) {
                 Image(systemName: "chevron.down.circle.fill").font(.system(size: 26))
@@ -281,8 +388,6 @@ struct DeckView: View {
 
     private var settingsMenu: some View {
         Menu {
-            Button("Deck Settings…") { showSettings = true }
-            Divider()
             Button("Import Page / Layout…") { importLayout() }
             Button("Export Page / Layout…") { exportLayout() }
             Divider()
@@ -299,6 +404,11 @@ struct DeckView: View {
             Button("Toggle Full Screen") {
                 NotificationCenter.default.post(name: .gcDeckFullScreen, object: nil)
             }
+            Divider()
+            Button(store.layout.autoArrange ? "Auto-Arrange  ✓" : "Auto-Arrange") {
+                store.layout.autoArrange.toggle()
+            }
+            Button("Tidy Up Now") { tidyUp() }
             Menu("Block Size") {
                 Button("Small") { settings.deckCellSize = 84 }
                 Button("Medium") { settings.deckCellSize = 104 }
@@ -327,17 +437,6 @@ struct DeckView: View {
             .padding(.horizontal, 8)
         }
         .frame(height: 30)
-    }
-
-    /// Move one item before/after another in the page's unified order (buttons
-    /// and widgets together). The packer re-flows from the new order.
-    private func reorder(_ dragId: UUID, _ targetId: UUID) {
-        guard dragId != targetId else { return }
-        var ids = store.layout.pages[pageIndex].resolvedOrder
-        guard let from = ids.firstIndex(of: dragId),
-              let to = ids.firstIndex(of: targetId) else { return }
-        ids.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
-        store.layout.pages[pageIndex].order = ids
     }
 
     private func binding(for btn: DeckButton) -> Binding<DeckButton> {
@@ -570,45 +669,6 @@ struct KeyCaptureField: View {
         .padding(.vertical, 2)
         .onDisappear { recorder.stop() }
     }
-}
-
-// MARK: - drag-to-reorder (unified: buttons + widgets share one order)
-
-/// Makes any tile draggable in edit mode. On drop-enter it asks the parent to
-/// reorder the dragged id relative to this tile's id.
-private struct DraggableItem: ViewModifier {
-    let id: UUID
-    let editing: Bool
-    @Binding var draggingID: UUID?
-    let reorder: (UUID, UUID) -> Void
-
-    func body(content: Content) -> some View {
-        if editing {
-            content
-                .onDrag {
-                    draggingID = id
-                    return NSItemProvider(object: id.uuidString as NSString)
-                }
-                .onDrop(of: [UTType.text],
-                        delegate: ItemDrop(target: id, draggingID: $draggingID,
-                                           reorder: reorder))
-        } else {
-            content
-        }
-    }
-}
-
-private struct ItemDrop: DropDelegate {
-    let target: UUID
-    @Binding var draggingID: UUID?
-    let reorder: (UUID, UUID) -> Void
-
-    func dropEntered(info: DropInfo) {
-        guard let d = draggingID, d != target else { return }
-        withAnimation(.easeInOut(duration: 0.15)) { reorder(d, target) }
-    }
-    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
-    func performDrop(info: DropInfo) -> Bool { draggingID = nil; return true }
 }
 
 // MARK: - single button
