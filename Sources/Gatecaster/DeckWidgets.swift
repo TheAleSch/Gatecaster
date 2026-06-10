@@ -378,7 +378,7 @@ struct WidgetTile: View {
             .overlay(alignment: .bottomTrailing) { if editing { resizeHandle } }
             .popover(isPresented: $showConfig) {
                 WidgetConfigEditor(widget: $widget)
-                    .gcSystemColorScheme()   // don't inherit the deck's forced theme scheme
+                    .gcPopoverChrome()   // opaque + system appearance: don't inherit the deck's glass/theme
             }
     }
 

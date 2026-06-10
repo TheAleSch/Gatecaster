@@ -43,16 +43,20 @@ struct GCPressStyle: ButtonStyle {
 }
 
 extension View {
-    /// Pin a subtree to the live SYSTEM appearance. The Deck forces
-    /// `colorScheme` to match its theme, and SwiftUI leaks that override into
-    /// popover *content* — but a macOS popover's bubble chrome always follows
-    /// the system appearance, so a dark-themed deck on a light Mac rendered
-    /// dark controls (black field, pale text) on a light bubble: unreadable.
-    /// Resetting popover content to the system scheme makes chrome and content
-    /// agree again, in either mode.
-    func gcSystemColorScheme() -> some View {
+    /// Chrome for the Deck's popovers. Two problems compound here: the Deck
+    /// forces `colorScheme` to its theme (which SwiftUI leaks into popover
+    /// content), and the deck panel draws on vibrant glass — so popovers came
+    /// out as a translucent veil sampling the dark deck behind them. In light
+    /// mode that left dark content on a dark blur: unreadable, "the background
+    /// doesn't change". Fix both: pin to the live SYSTEM appearance AND lay an
+    /// OPAQUE window-coloured surface, so the popover reads as a normal card in
+    /// either mode. (`background` resolves under the same forced scheme because
+    /// the `environment` wraps it.)
+    func gcPopoverChrome() -> some View {
         let dark = NSApp.effectiveAppearance
             .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        return environment(\.colorScheme, dark ? .dark : .light)
+        return self
+            .background(Color(nsColor: .windowBackgroundColor))
+            .environment(\.colorScheme, dark ? .dark : .light)
     }
 }
