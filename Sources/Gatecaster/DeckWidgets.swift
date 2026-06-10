@@ -401,7 +401,9 @@ struct WidgetTile: View {
 
     private var editControls: some View {
         HStack(spacing: 4) {
-            iconBtn("gearshape.fill", tint: .black, label: "Widget settings") { showConfig = true }
+            if WidgetConfigEditor.hasSettings(kind: widget.kind) {
+                iconBtn("gearshape.fill", tint: .black, label: "Widget settings") { showConfig = true }
+            }
             iconBtn("trash.fill", tint: .red, label: "Delete widget") { onDelete() }
         }
         .padding(4)
@@ -475,6 +477,12 @@ struct WidgetTile: View {
 /// Per-widget settings popover (the gear). Options vary by widget kind.
 struct WidgetConfigEditor: View {
     @Binding var widget: DeckWidget
+
+    /// Kinds that actually have options — the gear is hidden for the rest
+    /// (a popover saying "No settings" reads as broken, not informative).
+    static func hasSettings(kind: String) -> Bool {
+        kind == "claude" || kind == "clock"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

@@ -99,6 +99,16 @@ struct DeckView: View {
             let packed = packLayout(columns: cols)
             let gridRows = store.editing ? max(packed.rows, fitRows) : packed.rows
             ZStack(alignment: .topLeading) {
+                // A fresh page is a blank void — tell the user where to start.
+                if packed.slots.isEmpty && !store.editing {
+                    VStack(spacing: GC.Space.s) {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 28)).foregroundColor(.secondary.opacity(0.5))
+                        Text("Tap ✎ to edit, then + to add buttons and widgets")
+                            .font(.system(size: 13)).foregroundColor(.secondary)
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                }
                 if store.editing {
                     // A "+" in every empty cell — one unified add menu (these
                     // also serve as the visible grid affordance).
@@ -564,6 +574,7 @@ private struct AddCell: View {
                 Text("Add").font(.system(size: 12, weight: .bold)).foregroundColor(.secondary)
                 pick("Button", "square.grid.2x2", "button")
                 Divider()
+                sectionHeader("Widgets")
                 pick("Clock", "clock", "clock")
                 pick("Volume", "speaker.wave.2.fill", "volume")
                 pick("Media controls", "playpause.fill", "media")
@@ -575,6 +586,7 @@ private struct AddCell: View {
                 pick("Timer", "timer", "timer")
                 if !extensions.isEmpty {
                     Divider()
+                    sectionHeader("Extensions")
                     ForEach(extensions) { m in
                         pick(m.name, m.symbol ?? "puzzlepiece.extension", "ext:\(m.id)")
                     }
@@ -591,6 +603,13 @@ private struct AddCell: View {
             }
             .padding(12).frame(width: 220)
         }
+    }
+
+    private func sectionHeader(_ t: String) -> some View {
+        Text(t).font(.system(size: 10, weight: .semibold))
+            .foregroundColor(.secondary.opacity(0.7))
+            .textCase(.uppercase)
+            .padding(.top, 4)
     }
 
     private func pick(_ title: String, _ symbol: String, _ kind: String) -> some View {
