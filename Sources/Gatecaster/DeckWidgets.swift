@@ -368,15 +368,18 @@ struct WidgetTile: View {
             // The gear/trash/resize overlays are added AFTER this, so they stay live.
             .allowsHitTesting(!editing)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(RoundedRectangle(cornerRadius: 14)
+            .background(RoundedRectangle(cornerRadius: GC.Radius.tile)
                 .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6)))
-            .overlay(RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: GC.Radius.tile)
+                .strokeBorder(Color.primary.opacity(GC.Op.hairline), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: GC.Radius.tile))
             .overlay(alignment: .topLeading) { if previewW != nil { resizeGhost } }
             .overlay(alignment: .topTrailing) { if editing { editControls } }
             .overlay(alignment: .bottomTrailing) { if editing { resizeHandle } }
-            .popover(isPresented: $showConfig) { WidgetConfigEditor(widget: $widget) }
+            .popover(isPresented: $showConfig) {
+                WidgetConfigEditor(widget: $widget)
+                    .gcSystemColorScheme()   // don't inherit the deck's forced theme scheme
+            }
     }
 
     /// Snapped target outline drawn during a resize drag (anchored top-left,
@@ -384,9 +387,10 @@ struct WidgetTile: View {
     private var resizeGhost: some View {
         let w = previewW ?? widget.spanW
         let h = previewH ?? widget.spanH
-        return RoundedRectangle(cornerRadius: 14)
+        return RoundedRectangle(cornerRadius: GC.Radius.tile)
             .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-            .background(RoundedRectangle(cornerRadius: 14).fill(Color.accentColor.opacity(0.12)))
+            .background(RoundedRectangle(cornerRadius: GC.Radius.tile)
+                .fill(Color.accentColor.opacity(0.12)))
             .frame(width: ghostSize(w), height: ghostSize(h), alignment: .topLeading)
             .overlay(alignment: .bottomTrailing) {
                 Text("\(w)×\(h)")
@@ -400,20 +404,24 @@ struct WidgetTile: View {
 
     private var editControls: some View {
         HStack(spacing: 4) {
-            iconBtn("gearshape.fill", tint: .black) { showConfig = true }
-            iconBtn("trash.fill", tint: .red) { onDelete() }
+            if WidgetConfigEditor.hasSettings(kind: widget.kind) {
+                iconBtn("gearshape.fill", tint: .black, label: "Widget settings") { showConfig = true }
+            }
+            iconBtn("trash.fill", tint: .red, label: "Delete widget") { onDelete() }
         }
         .padding(4)
     }
 
-    private func iconBtn(_ symbol: String, tint: Color, _ act: @escaping () -> Void) -> some View {
+    private func iconBtn(_ symbol: String, tint: Color, label: String,
+                         _ act: @escaping () -> Void) -> some View {
         Button(action: act) {
             Image(systemName: symbol).font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.white).frame(width: 22, height: 22)
                 .background(Circle().fill(tint == .red
                     ? Color.red.opacity(0.85) : Color.black.opacity(0.5)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(GCPressStyle())
+        .accessibilityLabel(label)
     }
 
     /// Drag to resize in whole cells. Updates only a PREVIEW during the drag
@@ -472,6 +480,12 @@ struct WidgetTile: View {
 /// Per-widget settings popover (the gear). Options vary by widget kind.
 struct WidgetConfigEditor: View {
     @Binding var widget: DeckWidget
+
+    /// Kinds that actually have options — the gear is hidden for the rest
+    /// (a popover saying "No settings" reads as broken, not informative).
+    static func hasSettings(kind: String) -> Bool {
+        kind == "claude" || kind == "clock"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

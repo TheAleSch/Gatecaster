@@ -179,8 +179,9 @@ struct KeyboardTabView: View {
             .gcActiveBlur(cornerRadius: 26)
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(GCPressStyle())
         .foregroundColor(.primary)
+        .accessibilityLabel("Show keyboard")
     }
 }
 
@@ -279,7 +280,8 @@ struct KeyboardView: View {
                     Image(systemName: "chevron.down.circle.fill").font(.system(size: 26))
                         .frame(width: 40, height: 36).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).foregroundColor(.secondary)
+                .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
+                .accessibilityLabel("Hide keyboard")
             }
             .padding(.horizontal, 6).padding(.top, 4)
             .background(TitleBarDrag())   // mouse: drag panel by title bar only
@@ -309,7 +311,7 @@ struct KeyboardView: View {
             }
         }
         .padding(8)
-        .gcActiveBlur(cornerRadius: 16, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
+        .gcActiveBlur(cornerRadius: GC.Radius.panel, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
     }
 
     private var layoutRows: [[KeyDef]] { KeyboardLayouts.rows(for: settings.keyboardLayout) }
@@ -411,7 +413,7 @@ struct KeyboardView: View {
     }
 
     private func keyShape(special: Bool, active: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 6)
+        RoundedRectangle(cornerRadius: GC.Radius.key)
             .fill(active ? Color.accentColor
                          : Color(nsColor: .controlColor).opacity(special ? 0.55 : 1.0))
             .shadow(color: .black.opacity(0.15), radius: 0.5, y: 1)

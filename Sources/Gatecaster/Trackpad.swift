@@ -105,6 +105,9 @@ struct EdgeHintView: View {
 struct TrackpadView: View {
     @ObservedObject var settings: AppSettings
     var onHide: () -> Void
+    // The usage hint earns its keep for newcomers, then becomes clutter on a
+    // surface meant to read as a blank trackpad — fade it out after a moment.
+    @State private var hintVisible = true
 
     var body: some View {
         VStack(spacing: 6) {
@@ -116,13 +119,14 @@ struct TrackpadView: View {
                     Image(systemName: "chevron.down.circle.fill").font(.system(size: 26))
                         .frame(width: 40, height: 36).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).foregroundColor(.secondary)
+                .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
+                .accessibilityLabel("Hide trackpad")
             }
             .padding(.horizontal, 6).padding(.top, 4)
             .background(TitleBarDrag())   // mouse: drag panel by title bar only
 
             ZStack {
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: GC.Radius.tile)
                     .fill(Color(nsColor: .controlColor).opacity(0.45))
                 VStack(spacing: 4) {
                     Image(systemName: "hand.point.up.left")
@@ -130,11 +134,16 @@ struct TrackpadView: View {
                     Text("Trackpad — move, tap, 2-finger scroll")
                         .font(.system(size: 12)).foregroundColor(.secondary.opacity(0.6))
                 }
+                .opacity(hintVisible ? 1 : 0)
+                .task {
+                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    withAnimation(.easeOut(duration: 1.2)) { hintVisible = false }
+                }
             }
         }
         .padding(8)
         // Always-live blur: Liquid Glass froze a stale snapshot when these
         // never-key panels lost focus (macOS 26), so all panels use this.
-        .gcActiveBlur(cornerRadius: 16, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
+        .gcActiveBlur(cornerRadius: GC.Radius.panel, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
     }
 }

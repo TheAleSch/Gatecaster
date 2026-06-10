@@ -14,29 +14,32 @@ struct FloatingControlView: View {
     var onCollapse: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
+        // One uniform inset on every side (GC.Space.m) so the button grid never
+        // crowds the panel's rounded corners — the rows used to run edge-to-edge.
+        VStack(spacing: GC.Space.s) {
             HStack {
-                Capsule().fill(Color.secondary.opacity(0.5)).frame(width: 36, height: 5)
+                Capsule().fill(Color.secondary.opacity(GC.Op.grip)).frame(width: 36, height: 5)
                 Spacer()
                 Button(action: onCollapse) {
                     Image(systemName: "chevron.right.2").font(.system(size: 13, weight: .bold))
                 }
-                .buttonStyle(.plain).foregroundColor(.secondary)
+                .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
+                .accessibilityLabel("Collapse launcher")
             }
-            .padding(.horizontal, 12).padding(.top, 8)
 
-            HStack(spacing: 8) {
+            HStack(spacing: GC.Space.s) {
                 ctlButton("keyboard", "Keys", action: onKeyboard)
                 ctlButton("rectangle.and.hand.point.up.left", "Pad", action: onTrackpad)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: GC.Space.s) {
                 ctlButton("square.grid.2x2", "Deck", action: onDeck)
                 ctlButton("hand.tap", settings.gestureMode.label, action: cycleMode)
             }
-            ctlButton("gearshape", "Settings", wide: true, action: onSettings)
+            ctlButton("gearshape", "Settings", action: onSettings)
         }
-        .frame(width: 160, height: 210)
-        .gcActiveBlur(cornerRadius: 22)
+        .padding(GC.Space.m)
+        .frame(width: 176, height: 232)
+        .gcActiveBlur(cornerRadius: GC.Radius.panel)
     }
 
     private func cycleMode() {
@@ -47,13 +50,15 @@ struct FloatingControlView: View {
     }
 
     private func ctlButton(_ icon: String, _ label: String,
-                           wide: Bool = false, action: @escaping () -> Void) -> some View {
+                           action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 3) {
                 Image(systemName: icon).font(.system(size: 21))
                 Text(label).font(.system(size: 11)).lineLimit(1)
             }
-            .frame(width: wide ? 134 : 63, height: 48)
+            // Fill the row evenly: paired tiles split the width, a lone tile
+            // (Settings) spans it — so side margins stay uniform at any panel size.
+            .frame(maxWidth: .infinity, minHeight: 48)
             .foregroundColor(.primary)
         }
         .buttonStyle(.bordered).controlSize(.large)
@@ -65,13 +70,21 @@ struct FloatingTabView: View {
     var onExpand: () -> Void
     var body: some View {
         Button(action: onExpand) {
-            Image(systemName: "chevron.left.2")
-                .font(.system(size: 22, weight: .bold))
-                .frame(width: 48, height: 170)
-                .gcActiveBlur(cornerRadius: 14)
+            VStack(spacing: 10) {
+                // Which tab is this? The bare chevron was anonymous next to
+                // the keyboard/deck tabs — the grid glyph names it.
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Image(systemName: "chevron.left.2")
+                    .font(.system(size: 22, weight: .bold))
+            }
+            .frame(width: 48, height: 170)
+            .gcActiveBlur(cornerRadius: GC.Radius.panel)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(GCPressStyle())
         .foregroundColor(.primary)
+        .accessibilityLabel("Expand launcher")
     }
 }

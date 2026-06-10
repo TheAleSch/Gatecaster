@@ -58,7 +58,7 @@ struct CalibrationView: View {
     @ObservedObject var controller: CalibrationController
     var body: some View {
         ZStack {
-            Color.black.opacity(0.88).ignoresSafeArea()
+            Color.black.opacity(GC.Op.scrim).ignoresSafeArea()
             GeometryReader { geo in
                 CalTarget()
                     .position(x: geo.size.width * controller.currentFraction.x,

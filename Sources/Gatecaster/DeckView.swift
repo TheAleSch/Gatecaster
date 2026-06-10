@@ -55,16 +55,16 @@ struct DeckView: View {
         let op = theme.forcesOpaque ? 1.0 : settings.deckOpacity
         switch theme.background {
         case .blur:
-            Color.clear.gcActiveBlur(cornerRadius: 16)
+            Color.clear.gcActiveBlur(cornerRadius: GC.Radius.panel)
         case .solid(let hex):
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: GC.Radius.panel)
                 .fill(Color(hex: hex).opacity(op))
-                .overlay(RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: GC.Radius.panel)
+                    .strokeBorder(Color.primary.opacity(GC.Op.hairline), lineWidth: 1))
         case .gradient(let stops):
             ZStack {
-                Color.clear.gcActiveBlur(cornerRadius: 16)
-                RoundedRectangle(cornerRadius: 16)
+                Color.clear.gcActiveBlur(cornerRadius: GC.Radius.panel)
+                RoundedRectangle(cornerRadius: GC.Radius.panel)
                     .fill(LinearGradient(colors: stops.map { Color(hex: $0).opacity(op) },
                                          startPoint: .top, endPoint: .bottom))
             }
@@ -99,6 +99,16 @@ struct DeckView: View {
             let packed = packLayout(columns: cols)
             let gridRows = store.editing ? max(packed.rows, fitRows) : packed.rows
             ZStack(alignment: .topLeading) {
+                // A fresh page is a blank void — tell the user where to start.
+                if packed.slots.isEmpty && !store.editing {
+                    VStack(spacing: GC.Space.s) {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 28)).foregroundColor(.secondary.opacity(0.5))
+                        Text("Tap ✎ to edit, then + to add buttons and widgets")
+                            .font(.system(size: 13)).foregroundColor(.secondary)
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                }
                 if store.editing {
                     // A "+" in every empty cell — one unified add menu (these
                     // also serve as the visible grid affordance).
@@ -389,18 +399,21 @@ struct DeckView: View {
             } label: {
                 headerIcon(store.editing ? "checkmark" : "pencil")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(GCPressStyle())
             .foregroundColor(store.editing ? .accentColor : .secondary)
+            .accessibilityLabel(store.editing ? "Done editing" : "Edit deck")
             settingsMenu
             Button { showSettings = true } label: {
                 headerIcon("gearshape")
             }
-            .buttonStyle(.plain).foregroundColor(.secondary)
+            .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
+            .accessibilityLabel("Deck settings")
             if !store.fullScreen { ResizeBean() }   // nothing to resize at full screen
             Button(action: onHide) {
                 headerIcon("chevron.down")
             }
-            .buttonStyle(.plain).foregroundColor(.secondary)
+            .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
+            .accessibilityLabel("Hide deck")
         }
         .padding(.horizontal, 6)
         }
@@ -446,6 +459,7 @@ struct DeckView: View {
         .controlSize(.large)
         .frame(width: 36, height: 36)
         .foregroundColor(.secondary)
+        .accessibilityLabel("Deck menu")
     }
 
     private var pageBar: some View {
@@ -515,24 +529,47 @@ private struct PageChip: View {
     @State private var draft = ""
 
     var body: some View {
-        Text(name)
-            .font(.system(size: 12, weight: selected ? .semibold : .regular))
-            .padding(.horizontal, 12).padding(.vertical, 5)
-            .background(Capsule().fill(selected
-                ? Color.accentColor.opacity(0.85) : Color.secondary.opacity(0.15)))
-            .foregroundColor(selected ? .white : .primary)
-            .onLongPressGesture {
-                guard editing else { return }
-                draft = name; showRename = true
-            }
-            .popover(isPresented: $showRename) {
-                HStack {
-                    TextField("Page name", text: $draft)
-                        .textFieldStyle(.roundedBorder).frame(width: 160)
-                    Button("Save") { rename(draft); showRename = false }
+        HStack(spacing: 4) {
+            Text(name)
+                .font(.system(size: 12, weight: selected ? .semibold : .regular))
+            // Visible rename affordance — long-press alone is undiscoverable
+            // on a Mac (and invisible to touch users who never long-press).
+            if editing && selected {
+                Button {
+                    draft = name; showRename = true
+                } label: {
+                    // Small glyph, but a generously padded hit region: a bare
+                    // 10pt icon is far too fiddly to land a fingertip on. The
+                    // frame + contentShape make the whole area tappable while
+                    // the negative trailing inset keeps the chip from ballooning.
+                    Image(systemName: "pencil")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 32, height: 28)
+                        .contentShape(Rectangle())
                 }
-                .padding(10)
+                .buttonStyle(GCPressStyle())
+                .accessibilityLabel("Rename page")
+                .padding(.trailing, -6)
             }
+        }
+        .padding(.leading, 12).padding(.trailing, (editing && selected) ? 4 : 12)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(selected
+            ? Color.accentColor.opacity(0.85) : Color.secondary.opacity(GC.Op.fillSubtle)))
+        .foregroundColor(selected ? .white : .primary)
+        .onLongPressGesture {
+            guard editing else { return }
+            draft = name; showRename = true
+        }
+        .popover(isPresented: $showRename) {
+            HStack {
+                TextField("Page name", text: $draft)
+                    .textFieldStyle(.roundedBorder).frame(width: 160)
+                Button("Save") { rename(draft); showRename = false }
+            }
+            .padding(10)
+            .gcSystemColorScheme()   // don't inherit the deck's forced theme scheme
+        }
     }
 }
 
@@ -545,20 +582,22 @@ private struct AddCell: View {
 
     var body: some View {
         Button { show = true } label: {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: GC.Radius.tile)
                 .strokeBorder(Color.secondary.opacity(0.35),
                               style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
                 .overlay(Image(systemName: "plus")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.secondary.opacity(0.7)))
-                .contentShape(RoundedRectangle(cornerRadius: 12))
+                .contentShape(RoundedRectangle(cornerRadius: GC.Radius.tile))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(GCPressStyle())
+        .accessibilityLabel("Add button or widget")
         .popover(isPresented: $show, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Add").font(.system(size: 12, weight: .bold)).foregroundColor(.secondary)
                 pick("Button", "square.grid.2x2", "button")
                 Divider()
+                sectionHeader("Widgets")
                 pick("Clock", "clock", "clock")
                 pick("Volume", "speaker.wave.2.fill", "volume")
                 pick("Media controls", "playpause.fill", "media")
@@ -570,6 +609,7 @@ private struct AddCell: View {
                 pick("Timer", "timer", "timer")
                 if !extensions.isEmpty {
                     Divider()
+                    sectionHeader("Extensions")
                     ForEach(extensions) { m in
                         pick(m.name, m.symbol ?? "puzzlepiece.extension", "ext:\(m.id)")
                     }
@@ -585,7 +625,15 @@ private struct AddCell: View {
                     .buttonStyle(.plain).font(.system(size: 12))
             }
             .padding(12).frame(width: 220)
+            .gcSystemColorScheme()   // don't inherit the deck's forced theme scheme
         }
+    }
+
+    private func sectionHeader(_ t: String) -> some View {
+        Text(t).font(.system(size: 10, weight: .semibold))
+            .foregroundColor(.secondary.opacity(0.7))
+            .textCase(.uppercase)
+            .padding(.top, 4)
     }
 
     private func pick(_ title: String, _ symbol: String, _ kind: String) -> some View {
@@ -711,7 +759,7 @@ private struct DeckButtonView: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: GC.Radius.tile)
                 .fill(isNeutral
                       ? Color(nsColor: .controlColor).opacity(pressed ? 0.6 : 1.0)
                       : Color(hex: button.colorHex).opacity(pressed ? 0.55 : 0.85))
@@ -735,12 +783,13 @@ private struct DeckButtonView: View {
                         .foregroundColor(.white.opacity(0.9))
                         .background(Circle().fill(Color.black.opacity(0.4)))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(GCPressStyle())
                 .padding(4)
+                .accessibilityLabel("Delete button")
             }
         }
         .aspectRatio(1, contentMode: .fit)
-        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: GC.Radius.tile))
         .onTapGesture {
             if editing { showEditor = true } else { fire() }
         }
@@ -749,6 +798,7 @@ private struct DeckButtonView: View {
                 showEditor = false
                 onDelete()
             })
+            .gcSystemColorScheme()   // don't inherit the deck's forced theme scheme
         }
     }
 
