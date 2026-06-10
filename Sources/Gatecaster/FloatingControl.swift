@@ -21,7 +21,7 @@ struct FloatingControlView: View {
                 Button(action: onCollapse) {
                     Image(systemName: "chevron.right.2").font(.system(size: 13, weight: .bold))
                 }
-                .buttonStyle(.plain).foregroundColor(.secondary)
+                .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
             }
             .padding(.horizontal, 12).padding(.top, 8)
 
@@ -71,7 +71,7 @@ struct FloatingTabView: View {
                 .gcActiveBlur(cornerRadius: GC.Radius.panel)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(GCPressStyle())
         .foregroundColor(.primary)
     }
 }

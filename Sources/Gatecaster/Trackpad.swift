@@ -116,7 +116,7 @@ struct TrackpadView: View {
                     Image(systemName: "chevron.down.circle.fill").font(.system(size: 26))
                         .frame(width: 40, height: 36).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).foregroundColor(.secondary)
+                .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
             }
             .padding(.horizontal, 6).padding(.top, 4)
             .background(TitleBarDrag())   // mouse: drag panel by title bar only

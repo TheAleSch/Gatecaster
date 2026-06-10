@@ -414,7 +414,7 @@ struct WidgetTile: View {
                 .background(Circle().fill(tint == .red
                     ? Color.red.opacity(0.85) : Color.black.opacity(0.5)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(GCPressStyle())
     }
 
     /// Drag to resize in whole cells. Updates only a PREVIEW during the drag

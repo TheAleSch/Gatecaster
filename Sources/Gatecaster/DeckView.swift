@@ -389,18 +389,18 @@ struct DeckView: View {
             } label: {
                 headerIcon(store.editing ? "checkmark" : "pencil")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(GCPressStyle())
             .foregroundColor(store.editing ? .accentColor : .secondary)
             settingsMenu
             Button { showSettings = true } label: {
                 headerIcon("gearshape")
             }
-            .buttonStyle(.plain).foregroundColor(.secondary)
+            .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
             if !store.fullScreen { ResizeBean() }   // nothing to resize at full screen
             Button(action: onHide) {
                 headerIcon("chevron.down")
             }
-            .buttonStyle(.plain).foregroundColor(.secondary)
+            .buttonStyle(GCPressStyle()).foregroundColor(.secondary)
         }
         .padding(.horizontal, 6)
         }
@@ -553,7 +553,7 @@ private struct AddCell: View {
                     .foregroundColor(.secondary.opacity(0.7)))
                 .contentShape(RoundedRectangle(cornerRadius: GC.Radius.tile))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(GCPressStyle())
         .popover(isPresented: $show, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Add").font(.system(size: 12, weight: .bold)).foregroundColor(.secondary)
@@ -735,7 +735,7 @@ private struct DeckButtonView: View {
                         .foregroundColor(.white.opacity(0.9))
                         .background(Circle().fill(Color.black.opacity(0.4)))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(GCPressStyle())
                 .padding(4)
             }
         }
