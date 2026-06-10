@@ -538,14 +538,22 @@ private struct PageChip: View {
                 Button {
                     draft = name; showRename = true
                 } label: {
+                    // Small glyph, but a generously padded hit region: a bare
+                    // 10pt icon is far too fiddly to land a fingertip on. The
+                    // frame + contentShape make the whole area tappable while
+                    // the negative trailing inset keeps the chip from ballooning.
                     Image(systemName: "pencil")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 32, height: 28)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(GCPressStyle())
                 .accessibilityLabel("Rename page")
+                .padding(.trailing, -6)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 5)
+        .padding(.leading, 12).padding(.trailing, (editing && selected) ? 4 : 12)
+        .padding(.vertical, 5)
         .background(Capsule().fill(selected
             ? Color.accentColor.opacity(0.85) : Color.secondary.opacity(GC.Op.fillSubtle)))
         .foregroundColor(selected ? .white : .primary)
