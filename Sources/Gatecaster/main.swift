@@ -599,8 +599,10 @@ final class AppController: NSObject, NSApplicationDelegate {
                                                   width: 460, height: 420))
             panel.setFrame(r, display: true)
             saveFrame(panel)                       // persist the restored (non-full) frame
+            DeckStore.shared.fullScreen = false    // header shows the resize bean again
         } else {
             deckFullScreenRestore = panel.frame    // remember pre-full size/pos
+            DeckStore.shared.fullScreen = true     // header hides the resize bean
             // .screenSaver level (1000) is above the menu bar (24) and Dock — the panel
             // covers them rather than relying on the app being frontmost for presentationOptions.
             panel.level = .screenSaver

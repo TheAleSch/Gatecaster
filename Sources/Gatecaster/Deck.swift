@@ -194,6 +194,10 @@ final class DeckStore: ObservableObject {
     @Published var layout = DeckLayout()
     @Published var currentPage = 0
     @Published var editing = false
+    // Mirrors the panel's full-screen state (owned by the app's toggle in
+    // main.swift). Header UI reads it to hide the resize bean while full-screen,
+    // where resizing is meaningless.
+    @Published var fullScreen = false
 
     static let url = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("gatecaster-deck.json")

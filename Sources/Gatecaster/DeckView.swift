@@ -361,35 +361,50 @@ struct DeckView: View {
 
     // MARK: chrome (matches keyboard/trackpad panels; top bar = engine drag zone)
 
+    /// Shared deck-header icon: a filled circular chip matching ResizeBean's capsule
+    /// (same secondary 0.35 fill), with a BARE glyph inside. We draw the circle
+    /// ourselves because SF Symbols' pre-circled variants (`*.circle`) each pad
+    /// their ring differently — no font size or resizable box ever made them equal.
+    /// Owning the shape guarantees identical chips; only the small inner glyph
+    /// varies. 36×36 frame + contentShape is the hit area.
+    private func headerIcon(_ name: String) -> some View {
+        ZStack {
+            Circle().fill(Color.secondary.opacity(0.35))
+            Image(systemName: name)
+                .font(.system(size: 14, weight: .bold))
+        }
+        .frame(width: 30, height: 30)
+        .frame(width: 36, height: 36).contentShape(Rectangle())
+    }
+
     private var header: some View {
-        HStack(spacing: 10) {
+        VStack(spacing: 4) {
             Capsule().fill(Color.secondary.opacity(0.5)).frame(width: 40, height: 5)
+        HStack(spacing: 10) {
             Text("Deck").font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
             Spacer()
             Button {
                 store.editing.toggle()
             } label: {
-                Image(systemName: store.editing ? "checkmark.circle.fill" : "pencil.circle")
-                    .font(.system(size: 24))
-                    .frame(width: 36, height: 36).contentShape(Rectangle())
+                headerIcon(store.editing ? "checkmark" : "pencil")
             }
             .buttonStyle(.plain)
             .foregroundColor(store.editing ? .accentColor : .secondary)
             settingsMenu
             Button { showSettings = true } label: {
-                Image(systemName: "gearshape").font(.system(size: 22))
-                    .frame(width: 36, height: 36).contentShape(Rectangle())
+                headerIcon("gearshape")
             }
             .buttonStyle(.plain).foregroundColor(.secondary)
-            ResizeBean()
+            if !store.fullScreen { ResizeBean() }   // nothing to resize at full screen
             Button(action: onHide) {
-                Image(systemName: "chevron.down.circle.fill").font(.system(size: 26))
-                    .frame(width: 40, height: 36).contentShape(Rectangle())
+                headerIcon("chevron.down")
             }
             .buttonStyle(.plain).foregroundColor(.secondary)
         }
         .padding(.horizontal, 6)
+        }
+        .padding(.top, 6)
         .background(TitleBarDrag())   // mouse: drag panel by title bar only
     }
 
@@ -422,10 +437,13 @@ struct DeckView: View {
                 Button("Large") { settings.deckCellSize = 128 }
             }
         } label: {
-            Image(systemName: "ellipsis.circle").font(.system(size: 24))
-                .frame(width: 36, height: 36).contentShape(Rectangle())
+            headerIcon("ellipsis")   // same chip as the gear → identical by construction
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden)
+        // .borderlessButton renders its label a control-size SMALLER than the plain
+        // gear/pencil Buttons, which is why the glyph looked shrunk despite the shared
+        // helper. Force the large control size so it matches the rest of the row.
+        .controlSize(.large)
         .frame(width: 36, height: 36)
         .foregroundColor(.secondary)
     }
