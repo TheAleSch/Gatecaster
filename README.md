@@ -43,6 +43,10 @@ calibration all live there.
 | [docs/JOURNEY.md](docs/JOURNEY.md) | How it was reverse-engineered (and every mistake on the way) |
 | [docs/DEVELOPER_API.md](docs/DEVELOPER_API.md) | Integration hooks + planned multi-touch API |
 | [docs/PRODUCT.md](docs/PRODUCT.md) | Product plan & roadmap |
+| [docs/DECK_PLAN.md](docs/DECK_PLAN.md) | Deck (Stream Deck-style) plan & research |
+| [docs/EXTENSIONS.md](docs/EXTENSIONS.md) | Writing widget extensions (no Swift) |
+| [docs/EXTENSION_BUILDING.md](docs/EXTENSION_BUILDING.md) | Widget tutorial (publishable walkthrough) |
+| [docs/WIDGET_IDEAS.md](docs/WIDGET_IDEAS.md) | Widget/extension ideas & built-in vs extension split |
 
 ## License
 

@@ -4,7 +4,7 @@ import Foundation
 
 /// Turns Report ID 1 packets into macOS input: pointer / click / drag,
 /// press-and-hold right-click, two-finger momentum scroll, and continuous
-/// pinch-zoom + rotate via the clean-room gesture synth.
+/// pinch-zoom + rotate via the GestureKit gesture synth.
 final class Engine {
     private let s = AppSettings.shared      // all tunables / modes / calibration live here
     var bounds: CGRect = CGDisplayBounds(CGMainDisplayID())
@@ -43,6 +43,13 @@ final class Engine {
     var onPanelDragBegan: ((CGPoint) -> Bool)?   // true if a panel is at the point
     var onPanelDragMoved: ((CGPoint) -> Void)?
     var onPanelDragEnded: (() -> Void)?
+
+    // True when a one-finger drag starting at this point should SCROLL a deck
+    // widget (native ScrollView) rather than move the cursor. We then emit real
+    // scroll-wheel events (the `.fscroll` path) under the cursor — SwiftUI
+    // gestures don't receive our synthetic drags on a non-key panel, so the
+    // engine drives scrolling itself.
+    var deckScrollAt: ((CGPoint) -> Bool)?
 
     // Virtual trackpad: CG rect of the pad's active surface (nil when hidden).
     // Touches that START inside it act like a physical trackpad: relative cursor
@@ -137,9 +144,14 @@ final class Engine {
     private var timer: Timer?
 
     func start() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
+        // Added to .common run-loop modes (not just default): the tick must
+        // keep running while menus are open and windows are dragged, or
+        // momentum/lift detection freezes whenever the UI tracks the mouse.
+        let t = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
             self?.tick()
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     deinit { timer?.invalidate() }
@@ -317,6 +329,16 @@ final class Engine {
                 if s.ipadMode && s.inertia && movedTotal > s.tapMaxMove
                     && hypot(rv.0, rv.1) > s.flickFromTap {
                     vel = (rv.0, rv.1); beginMomentum(t, oneFinger: true)   // short flick coast
+                } else if overPanel {
+                    // Tap on one of OUR panels (keyboard/deck): hold the button
+                    // down briefly so SwiftUI press feedback (key highlight, pop)
+                    // actually renders — an instant down+up shows for ~0 frames.
+                    Pointer.leftDown(pLast)
+                    let up = pLast
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                        Pointer.leftUp(up)
+                    }
+                    mode = .idle
                 } else {
                     Pointer.leftDown(pLast); Pointer.leftUp(pLast)     // quick tap = click
                     mode = .idle
@@ -411,6 +433,14 @@ final class Engine {
             // A staggered first finger may have begun a one-finger drag; release
             // it so a click isn't held down through the gesture.
             if mode == .dragging { Pointer.leftUp(pLast) }
+            // CONSTRAINT: "always send the ended phase for every gesture you begin."
+            // A one-finger scroll (.fscroll) leaves an OPEN scroll phase; handleTwoFinger
+            // resets phaseOpen by hand without emitting phEnded, abandoning the gesture
+            // with a dangling phase — which wedges the macOS recognizer system-wide
+            // (touchscreen AND built-in trackpad) until the process exits. Close it
+            // first (mirrors the 3-finger swipe path above). endScrollPhase() is a
+            // no-op when no phase is open, so it's safe for .idle/.maybeTap/.dragging.
+            if mode == .fscroll { closeSmoothGestures(); endScrollPhase() }
             handleTwoFinger(contacts, t)
             return
         }
@@ -468,6 +498,18 @@ final class Engine {
                 if overPanel, onPanelDragBegan?(pStart) == true {
                     mode = .panelDrag; preTouchPos = nil
                     onPanelDragMoved?(p)
+                } else if overPanel, deckScrollAt?(pStart) == true {
+                    // Scrollable deck widget: drive a native ScrollView with real
+                    // scroll-wheel events. Taps still go through the click path,
+                    // so buttons keep working.
+                    mode = .fscroll; scrollSign = s.scrollSign
+                    sacc = (0, 0); phaseOpen = false
+                    emitScroll(rawDy: p.y - pLast.y, rawDx: p.x - pLast.x)
+                } else if overPanel {
+                    // Interior of one of OUR panels (deck slider, etc.): a real
+                    // mouse drag so SwiftUI controls track the finger.
+                    mode = .dragging; preTouchPos = nil
+                    Pointer.leftDown(pStart); Pointer.leftDrag(p)
                 } else if s.ipadMode {
                     mode = .fscroll; scrollSign = s.scrollSign
                     sacc = (0, 0); phaseOpen = false

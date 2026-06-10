@@ -1,11 +1,10 @@
 //
 //  GestureKit.h
-//  Clean-room synthesis of macOS trackpad gesture events (magnify / rotate /
-//  swipe), so apps respond as if a real Multi-Touch trackpad sent them.
+//  Synthesis of macOS trackpad gesture events (magnify / rotate / swipe),
+//  so apps respond as if a real Multi-Touch trackpad sent them.
 //
-//  This is an original implementation. It relies only on documented *facts*
-//  about the CGEvent gesture format (private field ids, event-type numbers) —
-//  none of any reference code is reproduced here.
+//  Original implementation based on observed CGEvent gesture format
+//  (private field ids, event-type numbers).
 //
 //  Phase values mirror NSEvent phases: 1 = began, 2 = changed, 4 = ended.
 //

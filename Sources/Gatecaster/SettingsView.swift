@@ -103,6 +103,7 @@ private struct LaunchAtLoginRow: View {
 
 extension Notification.Name {
     static let gcReconnectTouch = Notification.Name("gc.reconnectTouch")
+    static let gcDeckFullScreen = Notification.Name("gc.deckFullScreen")
 }
 
 /// Live permission checklist — the pattern popularized by Rectangle / AltTab:
@@ -305,6 +306,16 @@ struct SettingsView: View {
             Card(title: "Permissions") {
                 PermissionsView()
             }
+            Card(title: "Appearance") {
+                ToggleRow(title: "Blur panel backgrounds", isOn: $settings.panelBlur,
+                          info: "On: the keyboard, trackpad, and deck blur whatever is behind them (live glass). Off: a flat translucent background instead — lighter on the GPU and battery, and avoids occasional macOS glass glitches.")
+                if !settings.panelBlur {
+                    SliderRow(title: "Panel opacity",
+                              info: "How solid the flat panel background is when blur is off.",
+                              value: $settings.keyboardOpacity,
+                              range: 0.3...1.0, step: 0.05, decimals: 2)
+                }
+            }
             Card(title: "Touchscreen") {
                 let connected = !settings.connectedHardware.isEmpty
                     && settings.connectedHardware != "Not connected"
@@ -449,6 +460,10 @@ struct SettingsView: View {
                       info: "Adds esc + F1–F12 and sticky ⌘ ⌥ ⌃ fn keys. Tap a modifier, then a key, to send the combo (e.g. ⌘ then C = copy).")
             ToggleRow(title: "Numeric keypad", isOn: $settings.keyboardNumpad,
                       info: "Adds a numpad column on the right of the keyboard, with real keypad keycodes.")
+            ToggleRow(title: "Key press feedback", isOn: $settings.keyPressFeedback,
+                      info: "iOS-style press feedback: keys highlight and dip slightly when tapped, so it's clear the press registered.")
+            ToggleRow(title: "Key-pop callout", isOn: $settings.keyPopup,
+                      info: "Shows a magnified bubble of the letter just above the key while you hold it — like iOS — so your finger doesn't hide what you typed.")
             SliderRow(title: "Keyboard transparency",
                       info: "How see-through the on-screen keyboard is. Lower = more transparent.",
                       value: $settings.keyboardOpacity, range: 0.3...1.0, step: 0.05, decimals: 2)

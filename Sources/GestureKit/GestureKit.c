@@ -1,5 +1,5 @@
 //
-//  GestureKit.c — clean-room trackpad-gesture synthesis.
+//  GestureKit.c — trackpad-gesture synthesis.
 //
 //  How a synthetic magnify/rotate/swipe is made honored by AppKit:
 //    1. create a real mouse event (CGEventCreateMouseEvent) — this gives the

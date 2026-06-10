@@ -27,6 +27,13 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var floatingPanel: NSPanel?
     private var trackpadPanel: NSPanel?
     private var padBag: AnyCancellable?
+    private var deckPanel: NSPanel?
+    private var deckBag: AnyCancellable?
+    // Pre-full-screen deck frame, kept in a dedicated ivar (NOT the persisted
+    // panelFrames["deck"] slot) because the didResize→settleFrame observer would
+    // otherwise overwrite that slot with the full-screen frame, so toggling
+    // full-screen OFF would "restore" to full size. Non-nil ⇔ deck is full-screen.
+    private var deckFullScreenRestore: NSRect?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         // SINGLE INSTANCE: two engines fighting over the same HID device put the
@@ -67,6 +74,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             self.draggedPanel = nil
         }
         engine.trackpadRect = { [weak self] in self?.trackpadActiveRect() }
+        engine.deckScrollAt = { [weak self] cg in self?.deckScrollRegion(cg) ?? false }
         engine.onShowKeyboard = { [weak self] in DispatchQueue.main.async { self?.toggleKeyboard() } }
         engine.onNotificationCenter = { [weak self] in
             DispatchQueue.main.async { self?.openNotificationCenter() }
@@ -124,6 +132,12 @@ final class AppController: NSObject, NSApplicationDelegate {
                 if on { self?.showTrackpad() } else { self?.hideTrackpad() }
                 self?.rebuildMenu()
             }
+        if settings.showDeck { showDeck() }
+        deckBag = settings.$showDeck.dropFirst().receive(on: RunLoop.main)
+            .sink { [weak self] on in
+                if on { self?.showDeck() } else { self?.hideDeck() }
+                self?.rebuildMenu()
+            }
         // Visual strips marking the edge-gesture zones (pure affordance; pass-through),
         // with live state: fingers detected → lighter blue, armed → black.
         engine.onEdgeZoneState = { [weak self] bottomZone, st in
@@ -168,6 +182,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         item(menu, "Settings…", #selector(openSettings))
         item(menu, "Show / Hide Touch Keyboard", #selector(toggleKeyboard))
         item(menu, "Show / Hide Virtual Trackpad", #selector(toggleTrackpad))
+        item(menu, "Show / Hide Deck", #selector(toggleDeck))
         item(menu, "Show / Hide Floating Control", #selector(toggleFloatingControl))
         item(menu, "Choose Touchscreen Display…", #selector(startDisplayPicker))
         item(menu, "Calibrate Touchscreen…", #selector(startCalibration))
@@ -183,8 +198,9 @@ final class AppController: NSObject, NSApplicationDelegate {
             debugMenu.addItem(it)
         }
         dbg("Show edge-gesture zones", #selector(toggleEdgeZones), settings.showEdgeZones)
-        dbg("Verbose logging", #selector(toggleVerboseLog), settings.verbose)
-        dbg("Capture trackpad gestures (learn format)", #selector(toggleCapture), capture.isRunning)
+        // Hidden for now (developer-only): verbose logging + gesture capture.
+        // dbg("Verbose logging", #selector(toggleVerboseLog), settings.verbose)
+        // dbg("Capture trackpad gestures (learn format)", #selector(toggleCapture), capture.isRunning)
         let dbgItem = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
         menu.addItem(dbgItem)
         menu.setSubmenu(debugMenu, for: dbgItem)
@@ -240,7 +256,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             panel.backgroundColor = .clear
             panel.ignoresMouseEvents = true       // affordance only — never intercepts
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            let host = NSHostingView(rootView: EdgeHintView(horizontal: horizontal,
+            let host = GlassHostingView(rootView: EdgeHintView(horizontal: horizontal,
                                                             states: edgeStates))
             host.frame = NSRect(origin: .zero, size: rect.size)
             panel.contentView = host
@@ -298,14 +314,38 @@ final class AppController: NSObject, NSApplicationDelegate {
         } else {
             clampToTouchDisplay(w)
         }
+        saveFrame(w)
     }
 
     private func isTouchPanel(_ w: NSWindow) -> Bool {
-        w === keyboardPanel || w === floatingPanel || w === trackpadPanel
+        w === keyboardPanel || w === floatingPanel || w === trackpadPanel || w === deckPanel
+    }
+
+    // MARK: panel frame persistence (size + position survive relaunch)
+    private func panelKey(for w: NSWindow) -> String? {
+        if w === keyboardPanel { return "keyboard" }
+        if w === trackpadPanel { return "trackpad" }
+        if w === deckPanel { return "deck" }
+        if w === floatingPanel { return "floating" }
+        return nil
+    }
+    private func saveFrame(_ w: NSWindow) {
+        guard let key = panelKey(for: w), w.frame.width > 240 else { return }  // skip collapsed tabs
+        // Don't persist the deck while it's full-screen — that frame belongs in the
+        // dedicated restore ivar, not the slot we reopen the deck at. (The toggle's
+        // own restore-branch saveFrame still records the non-full frame.)
+        if w === deckPanel, deckFullScreenRestore != nil { return }
+        settings.panelFrames[key] = NSStringFromRect(w.frame)
+    }
+    /// Saved frame for a panel, clamped onto the touch display, or nil.
+    private func savedFrame(_ key: String) -> NSRect? {
+        guard let s = settings.panelFrames[key] else { return nil }
+        let r = NSRectFromString(s)
+        return (r.width > 40 && r.height > 40) ? r : nil
     }
 
     private func clampAllPanels() {
-        for p in [keyboardPanel, floatingPanel, trackpadPanel].compactMap({ $0 }) {
+        for p in [keyboardPanel, floatingPanel, trackpadPanel, deckPanel].compactMap({ $0 }) {
             clampToTouchDisplay(p)
         }
     }
@@ -358,7 +398,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         panel.hidesOnDeactivate = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.isMovableByWindowBackground = true     // drag the keyboard by its top bar / gaps
+        panel.isMovableByWindowBackground = false    // title-bar handle only (see TitleBarDrag); bg-drag moved the panel under sliders
         // Show over the active Space and over full-screen apps, even though we're accessory.
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         keyboardPanel = panel
@@ -369,7 +409,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func expandKeyboard() {
         guard let panel = keyboardPanel else { return }
         let view = KeyboardView(settings: settings) { [weak self] in self?.collapseKeyboardToTab() }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         let sf = (nsScreen(for: selectedDisplay) ?? NSScreen.main)?.frame ?? engine.bounds
         // Numpad ADDS width (main keys keep their size): 820 / 0.78 ≈ 1060.
         let w: CGFloat = settings.keyboardNumpad ? 1060 : 820
@@ -383,7 +423,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func collapseKeyboardToTab() {
         guard let panel = keyboardPanel else { return }
         let view = KeyboardTabView { [weak self] in self?.expandKeyboard() }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         let sf = (nsScreen(for: selectedDisplay) ?? NSScreen.main)?.frame ?? engine.bounds
         let rect = NSRect(x: sf.midX - 110, y: sf.minY + 2, width: 220, height: 52)
         host.frame = NSRect(origin: .zero, size: rect.size)
@@ -427,14 +467,14 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func beginPanelDrag(at cg: CGPoint) -> Bool {
         let flip = NSScreen.screens.first?.frame.maxY ?? 0
-        for panel in [keyboardPanel, floatingPanel, trackpadPanel].compactMap({ $0 }) {
+        for panel in [keyboardPanel, floatingPanel, trackpadPanel, deckPanel].compactMap({ $0 }) {
             let f = panel.frame
             let cgRect = CGRect(x: f.minX, y: flip - f.maxY, width: f.width, height: f.height)
             guard cgRect.contains(cg) else { continue }
             // Full panels (keyboard / trackpad) only drag from the TOP BAR —
             // touches below it pass through to the keys / pad surface.
             // Tabs and the floating launcher stay draggable anywhere.
-            let isFullPanel = (panel === keyboardPanel || panel === trackpadPanel)
+            let isFullPanel = (panel === keyboardPanel || panel === trackpadPanel || panel === deckPanel)
                 && f.width > 240
             let topBar = CGRect(x: cgRect.minX, y: cgRect.minY,
                                 width: cgRect.width, height: 46)
@@ -473,7 +513,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Converts each panel's AppKit (bottom-left) frame to CG coords to compare.
     private func pointIsOverPanel(_ p: CGPoint) -> Bool {
         let flip = NSScreen.screens.first?.frame.maxY ?? 0
-        for panel in [keyboardPanel, floatingPanel, trackpadPanel].compactMap({ $0 }) {
+        for panel in [keyboardPanel, floatingPanel, trackpadPanel, deckPanel].compactMap({ $0 }) {
             let f = panel.frame
             let cg = CGRect(x: f.minX, y: flip - f.maxY, width: f.width, height: f.height)
             if cg.contains(p) { return true }
@@ -489,7 +529,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         let view = TrackpadView(settings: settings) { [weak self] in
             self?.settings.showTrackpad = false
         }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         let sf = (nsScreen(for: selectedDisplay) ?? NSScreen.main)?.frame ?? engine.bounds
         let rect = NSRect(x: sf.maxX - 420, y: sf.minY + 80, width: 380, height: 280)
         host.frame = NSRect(origin: .zero, size: rect.size)
@@ -501,7 +541,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         panel.hidesOnDeactivate = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false   // title-bar handle only (see TitleBarDrag)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = host
         panel.setFrame(rect, display: true)
@@ -511,12 +551,112 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func hideTrackpad() { trackpadPanel?.orderOut(nil); trackpadPanel = nil }
 
+    // MARK: deck panel (v3 PoC — Stream Deck-style control surface)
+    @objc private func toggleDeck() { settings.showDeck.toggle() }
+
+    private func showDeck() {
+        guard deckPanel == nil else { return }
+        let view = DeckView(store: DeckStore.shared, settings: settings) { [weak self] in
+            self?.settings.showDeck = false
+        }
+        let host = GlassHostingView(rootView: view)
+        let sf = (nsScreen(for: selectedDisplay) ?? NSScreen.main)?.frame ?? engine.bounds
+        let rect = savedFrame("deck") ?? NSRect(x: sf.minX + 60, y: sf.midY - 200,
+                                                width: 460, height: 420)
+        host.frame = NSRect(origin: .zero, size: rect.size)
+        let panel = NSPanel(contentRect: rect, styleMask: [.nonactivatingPanel, .borderless],
+                            backing: .buffered, defer: false)
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.isMovableByWindowBackground = false   // title-bar handle only (see TitleBarDrag)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = host
+        panel.setFrame(rect, display: true)
+        panel.orderFrontRegardless()
+        deckPanel = panel
+    }
+
+    /// Toggle the deck between its saved size and owning the full display.
+    /// Raises panel to .screenSaver level (above menu bar) so it physically covers all
+    /// system chrome — presentationOptions alone won't work because the panel is
+    /// nonactivating and macOS only honours those options for the frontmost app.
+    @objc private func toggleDeckFullScreen() {
+        guard let panel = deckPanel,
+              let screen = nsScreen(for: selectedDisplay) ?? NSScreen.main else { return }
+        let sf = screen.frame
+        // Source of truth for "are we full-screen" is the restore ivar, not a
+        // size compare (a near-full manual resize must not read as full-screen).
+        if let restore = deckFullScreenRestore {
+            panel.level = .floating
+            NSApp.presentationOptions = []
+            deckFullScreenRestore = nil
+            let r = (restore.width > 40 && restore.height > 40) ? restore
+                  : (savedFrame("deck") ?? NSRect(x: sf.minX + 60, y: sf.midY - 200,
+                                                  width: 460, height: 420))
+            panel.setFrame(r, display: true)
+            saveFrame(panel)                       // persist the restored (non-full) frame
+        } else {
+            deckFullScreenRestore = panel.frame    // remember pre-full size/pos
+            // .screenSaver level (1000) is above the menu bar (24) and Dock — the panel
+            // covers them rather than relying on the app being frontmost for presentationOptions.
+            panel.level = .screenSaver
+            NSApp.presentationOptions = [.hideMenuBar, .hideDock]
+            panel.setFrame(sf, display: true)
+        }
+    }
+
+    private func hideDeck() {
+        deckPanel?.level = .floating
+        NSApp.presentationOptions = []
+        deckPanel?.orderOut(nil)
+        deckPanel = nil
+    }
+
+    /// True when a one-finger drag at `cg` (CG, top-left) is over the deck's
+    /// content area (below the header) and the deck is NOT in edit mode — those
+    /// drags should scroll a widget's native ScrollView, not move the cursor.
+    /// In edit mode interior drags stay mouse-drags (resize / reorder).
+    private func deckScrollRegion(_ cg: CGPoint) -> Bool {
+        guard let panel = deckPanel, !DeckStore.shared.editing else { return false }
+        let flip = NSScreen.screens.first?.frame.maxY ?? 0
+        let f = panel.frame
+        // Non-grid header strip above DeckView's scrollable `activeGrid`. Must match
+        // DeckView.body's layout EXACTLY or we get a dead zone (excluding too much)
+        // or scroll interference over the page bar (excluding too little):
+        //   .padding(.top, 4) + header(36) + VStack spacing(6) + pageBar(30) + spacing(6)
+        // = 82pt. (header's tallest content is the 36pt button row; pageBar is
+        // .frame(height: 30).) Hardcoded-but-derived so a DeckView layout change is
+        // a visible one-line update here.
+        let header: CGFloat = 4 + 36 + 6 + 30 + 6
+        let region = CGRect(x: f.minX, y: (flip - f.maxY) + header,
+                            width: f.width, height: max(0, f.height - header))
+        guard region.contains(cg) else { return false }
+        // Volume bars opt OUT of scroll routing: a drag there must reach the bar's
+        // SwiftUI gesture as a real mouse drag. DeckWidgets publishes each bar's
+        // frame via `g.frame(in: .global)`, which for an NSHostingView is the ROOT
+        // hosting view's space — i.e. panel-content-LOCAL (top-left origin), NOT
+        // screen-global. So map it into screen Quartz coords the same way `region`
+        // is built: x += panel left (f.minX), y += panel top (flip - f.maxY).
+        // (A prior "simplification" to compare cg against the raw rect placed the
+        // exclusion at the wrong spot and killed the slider drag — do not re-do it.)
+        for local in DeckDragRegions.volumeRects.values {
+            let cgRect = CGRect(x: f.minX + local.minX, y: (flip - f.maxY) + local.minY,
+                                width: local.width, height: local.height)
+            if cgRect.contains(cg) { return false }
+        }
+        return true
+    }
+
     /// Collapsed trackpad: a thin pull tab on the right edge (its active surface
     /// becomes empty automatically, so no touches are intercepted while collapsed).
     private func collapseTrackpadToTab() {
         guard let panel = trackpadPanel else { return }
         let view = FloatingTabView { [weak self] in self?.expandTrackpad() }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         let sf = floatingScreenFrame()
         let rect = NSRect(x: sf.maxX - 48, y: panel.frame.minY, width: 48, height: 170)
         host.frame = NSRect(origin: .zero, size: rect.size)
@@ -529,7 +669,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         let view = TrackpadView(settings: settings) { [weak self] in
             self?.settings.showTrackpad = false
         }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         let sf = floatingScreenFrame()
         let y = max(sf.minY + 40, min(panel.frame.minY, sf.maxY - 320))
         let rect = NSRect(x: sf.maxX - 420, y: y, width: 380, height: 280)
@@ -554,19 +694,20 @@ final class AppController: NSObject, NSApplicationDelegate {
         let view = FloatingControlView(settings: settings,
                                        onKeyboard: { [weak self] in self?.toggleKeyboard() },
                                        onTrackpad: { [weak self] in self?.toggleTrackpad() },
+                                       onDeck: { [weak self] in self?.settings.showDeck.toggle() },
                                        onSettings: { [weak self] in self?.openSettings() },
                                        onCollapse: { [weak self] in self?.collapseFloating() })
-        let host = NSHostingView(rootView: view)
-        host.frame = NSRect(x: 0, y: 0, width: 160, height: 160)
+        let host = GlassHostingView(rootView: view)
+        host.frame = NSRect(x: 0, y: 0, width: 160, height: 210)
         let sf = floatingScreenFrame()
         panel.contentView = host
-        setFrameAnimated(panel, NSRect(x: sf.maxX - 200, y: sf.midY - 80, width: 160, height: 160))
+        setFrameAnimated(panel, NSRect(x: sf.maxX - 200, y: sf.midY - 105, width: 160, height: 210))
     }
 
     private func collapseFloating() {
         guard let panel = floatingPanel else { return }
         let view = FloatingTabView { [weak self] in self?.expandFloating() }
-        let host = NSHostingView(rootView: view)
+        let host = GlassHostingView(rootView: view)
         host.frame = NSRect(x: 0, y: 0, width: 48, height: 170)
         let sf = floatingScreenFrame()
         // pin to the right edge, keeping the current vertical position
@@ -598,7 +739,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             win.level = .screenSaver
             win.isOpaque = false
             win.backgroundColor = .clear
-            win.contentView = NSHostingView(rootView: view)
+            win.contentView = GlassHostingView(rootView: view)
             win.setFrame(screen.frame, display: true)
             win.orderFrontRegardless()
             pickerWindows.append(win)
@@ -658,7 +799,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         win.level = .screenSaver
         win.isOpaque = false
         win.backgroundColor = .clear
-        win.contentView = NSHostingView(rootView: CalibrationView(controller: controller))
+        win.contentView = GlassHostingView(rootView: CalibrationView(controller: controller))
         win.setFrame(frame, display: true)
         calibrationWindow = win
         NSApp.activate(ignoringOtherApps: true)
@@ -704,11 +845,16 @@ final class AppController: NSObject, NSApplicationDelegate {
     @objc private func toggleCapture() { capture.toggle(); rebuildMenu() }
     @objc private func reconnectTouch() { hid.reconnect() }
     private var reconnectObserver: NSObjectProtocol?
+    private var deckFullObserver: NSObjectProtocol?
     func observeSettingsRequests() {
         // Settings → General → Touchscreen "Reconnect" button.
         reconnectObserver = NotificationCenter.default.addObserver(
             forName: .gcReconnectTouch, object: nil, queue: .main
         ) { [weak self] _ in self?.hid.reconnect() }
+        // Deck → Full Screen toggle.
+        deckFullObserver = NotificationCenter.default.addObserver(
+            forName: .gcDeckFullScreen, object: nil, queue: .main
+        ) { [weak self] _ in self?.toggleDeckFullScreen() }
     }
     @objc private func toggleEdgeZones() { settings.showEdgeZones.toggle(); rebuildMenu() }
     @objc private func toggleVerboseLog() { settings.verbose.toggle(); rebuildMenu() }

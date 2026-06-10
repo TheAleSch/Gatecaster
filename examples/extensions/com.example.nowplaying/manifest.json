@@ -1,0 +1,47 @@
+{
+  "id": "com.example.nowplaying",
+  "name": "Now Playing",
+  "symbol": "music.note",
+  "colorHex": "#32D74B",
+  "fields": [
+    {
+      "label": "Track",
+      "refreshKey": "title"
+    },
+    {
+      "label": "Artist",
+      "refreshKey": "artist"
+    }
+  ],
+  "buttons": [
+    {
+      "symbol": "backward.fill",
+      "action": {
+        "kind": "media",
+        "value": "previous"
+      }
+    },
+    {
+      "symbol": "playpause.fill",
+      "action": {
+        "kind": "media",
+        "value": "playpause"
+      }
+    },
+    {
+      "symbol": "forward.fill",
+      "action": {
+        "kind": "media",
+        "value": "next"
+      }
+    }
+  ],
+  "refresh": {
+    "command": "osascript -e 'tell application \"Music\" to set t to name of current track & \"|\" & artist of current track' 2>/dev/null | awk -F'|' '{printf \"{\\\"title\\\":\\\"%s\\\",\\\"artist\\\":\\\"%s\\\"}\", $1, $2}'",
+    "everySeconds": 5
+  },
+  "minW": 2,
+  "minH": 1,
+  "defaultW": 3,
+  "defaultH": 2
+}

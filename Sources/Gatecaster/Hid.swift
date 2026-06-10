@@ -52,8 +52,11 @@ final class HidTouch {
             if me.device === dev { me.device = nil; me.onDeviceInfo?(nil) }
         }, ctx)
 
+        // .commonModes, NOT .defaultMode: while a menu is open or a window is
+        // being dragged, the main run loop leaves default mode — default-mode
+        // sources go silent and touch freezes until the menu closes.
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(),
-                                        CFRunLoopMode.defaultMode.rawValue)
+                                        CFRunLoopMode.commonModes.rawValue)
         IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
     }
 

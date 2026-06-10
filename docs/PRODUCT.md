@@ -131,3 +131,5 @@ edge gestures, calibration UX). Verify current UPDD pricing before launch copy.
 - Beta: 25 external testers, ≥3 non-ELAN controllers working.
 - Launch month: 200 trials, 25% conversion ≈ $1.2k — validates continuing.
 - Support load < 2 emails/day (else fix onboarding, not inbox).
+
+> v3 deck: detailed phased plan + competitor research now lives in [DECK_PLAN.md](DECK_PLAN.md) (PoC implemented on branch `v3-deck-poc`).

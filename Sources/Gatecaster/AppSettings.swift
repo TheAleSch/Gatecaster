@@ -106,8 +106,17 @@ final class AppSettings: ObservableObject {
     @Published var keyboardExtendedKeys = true // esc/F1–F12 row + ⌘⌥⌃fn modifier keys
     @Published var keyboardLayout = "us"       // us / fr / es / pt / zh / ja (keycap labels)
     @Published var keyboardNumpad = false      // numeric keypad column
+    @Published var keyPressFeedback = true     // iOS-style highlight + dip on key press
+    @Published var keyPopup = true             // magnified key-pop callout above letter keys
     @Published var showFloatingControl = false // draggable touch launcher panel
     @Published var showTrackpad = false        // virtual trackpad panel
+    @Published var showDeck = false            // Stream Deck-style control surface (v3 PoC)
+    @Published var deckCellSize = 104.0        // deck grid block size (pt); bigger = chunkier tiles
+    @Published var panelFrames: [String: String] = [:]   // saved frames per panel (keyboard/trackpad/deck/floating)
+    @Published var deckBackground = "blur"     // legacy; superseded by deckTheme
+    @Published var deckOpacity = 0.9           // panel transparency (0.3–1.0)
+    @Published var deckTheme = "midnight"      // deck visual theme (see DeckTheme)
+    @Published var panelBlur = true            // live glass blur behind panels; off = flat translucent (cheaper)
     @Published var trackpadGain = 1.5          // virtual trackpad cursor sensitivity
 
     // MARK: calibration — raw panel coords that map to the screen edges
@@ -157,6 +166,15 @@ final class AppSettings: ObservableObject {
         var palmRejection: Bool?
         var palmPanelGuard: Bool?
         var palmClusterPts: Double?
+        var showDeck: Bool?
+        var panelBlur: Bool?
+        var keyPressFeedback: Bool?
+        var keyPopup: Bool?
+        var deckCellSize: Double?
+        var panelFrames: [String: String]?
+        var deckBackground: String?
+        var deckOpacity: Double?
+        var deckTheme: String?
     }
 
     static let url = FileManager.default.homeDirectoryForCurrentUser
@@ -195,7 +213,11 @@ final class AppSettings: ObservableObject {
                  showFloatingControl: showFloatingControl,
                  showTrackpad: showTrackpad, trackpadGain: trackpadGain,
                  palmRejection: palmRejection, palmPanelGuard: palmPanelGuard,
-                 palmClusterPts: palmClusterPts)
+                 palmClusterPts: palmClusterPts, showDeck: showDeck,
+                 panelBlur: panelBlur, keyPressFeedback: keyPressFeedback,
+                 keyPopup: keyPopup, deckCellSize: deckCellSize,
+                 panelFrames: panelFrames, deckBackground: deckBackground,
+                 deckOpacity: deckOpacity, deckTheme: deckTheme)
     }
 
     private func apply(_ s: Snapshot) {
@@ -232,6 +254,15 @@ final class AppSettings: ObservableObject {
         palmRejection = s.palmRejection ?? true
         palmPanelGuard = s.palmPanelGuard ?? true
         palmClusterPts = s.palmClusterPts ?? 56
+        showDeck = s.showDeck ?? false
+        panelBlur = s.panelBlur ?? true
+        keyPressFeedback = s.keyPressFeedback ?? true
+        keyPopup = s.keyPopup ?? true
+        deckCellSize = s.deckCellSize ?? 104
+        panelFrames = s.panelFrames ?? [:]
+        deckBackground = s.deckBackground ?? "blur"
+        deckOpacity = s.deckOpacity ?? 0.9
+        deckTheme = s.deckTheme ?? "midnight"
     }
 
     func save() {
@@ -265,5 +296,9 @@ final class AppSettings: ObservableObject {
         showEdgeZones: false, keyboardOpacity: 0.85,
         keyboardExtendedKeys: true, keyboardLayout: "us", keyboardNumpad: false,
         showFloatingControl: false, showTrackpad: false, trackpadGain: 1.5,
-        palmRejection: true, palmPanelGuard: true, palmClusterPts: 56)
+        palmRejection: true, palmPanelGuard: true, palmClusterPts: 56,
+        showDeck: false, panelBlur: true,
+        keyPressFeedback: true, keyPopup: true, deckCellSize: 104,
+        panelFrames: [:], deckBackground: "blur", deckOpacity: 0.9,
+        deckTheme: "midnight")
 }
