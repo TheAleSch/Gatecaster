@@ -66,10 +66,17 @@ struct FloatingTabView: View {
     var onExpand: () -> Void
     var body: some View {
         Button(action: onExpand) {
-            Image(systemName: "chevron.left.2")
-                .font(.system(size: 22, weight: .bold))
-                .frame(width: 48, height: 170)
-                .gcActiveBlur(cornerRadius: GC.Radius.panel)
+            VStack(spacing: 10) {
+                // Which tab is this? The bare chevron was anonymous next to
+                // the keyboard/deck tabs — the grid glyph names it.
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Image(systemName: "chevron.left.2")
+                    .font(.system(size: 22, weight: .bold))
+            }
+            .frame(width: 48, height: 170)
+            .gcActiveBlur(cornerRadius: GC.Radius.panel)
                 .contentShape(Rectangle())
         }
         .buttonStyle(GCPressStyle())

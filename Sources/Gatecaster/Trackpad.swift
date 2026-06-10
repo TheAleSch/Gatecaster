@@ -105,6 +105,9 @@ struct EdgeHintView: View {
 struct TrackpadView: View {
     @ObservedObject var settings: AppSettings
     var onHide: () -> Void
+    // The usage hint earns its keep for newcomers, then becomes clutter on a
+    // surface meant to read as a blank trackpad — fade it out after a moment.
+    @State private var hintVisible = true
 
     var body: some View {
         VStack(spacing: 6) {
@@ -130,6 +133,11 @@ struct TrackpadView: View {
                         .font(.system(size: 26)).foregroundColor(.secondary.opacity(0.5))
                     Text("Trackpad — move, tap, 2-finger scroll")
                         .font(.system(size: 12)).foregroundColor(.secondary.opacity(0.6))
+                }
+                .opacity(hintVisible ? 1 : 0)
+                .task {
+                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    withAnimation(.easeOut(duration: 1.2)) { hintVisible = false }
                 }
             }
         }
