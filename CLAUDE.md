@@ -39,7 +39,7 @@ rebuilds; ad-hoc signing forces re-granting every build.
 Two SPM targets in [Package.swift](Package.swift):
 
 - **GestureKit** (C, [Sources/GestureKit/](Sources/GestureKit/)) — the
-  clean-room gesture synth. `gk_post_fields` posts a magnify/rotate gesture event
+  gesture synth. `gk_post_fields` posts a magnify/rotate gesture event
   plus the capture-dump helper. The old IOHID graft (which crashed WindowServer)
   has been deleted; only the working recipe remains.
 - **Gatecaster** (Swift, [Sources/Gatecaster/](Sources/Gatecaster/)) — the app.

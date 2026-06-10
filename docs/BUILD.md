@@ -5,7 +5,7 @@
 A menu-bar app that enables the Visual Beat V17UT's 10-finger digitizer and maps
 it to native macOS input — pointer, click, drag, right-click, two-finger
 **momentum scroll**, and **continuous pinch-zoom + rotate** via our own
-clean-room gesture synthesis. Includes a touch-friendly settings
+gesture synthesis via GestureKit. Includes a touch-friendly settings
 window, corner-tap calibration, and fully tunable timing.
 
 ## Layout
@@ -16,7 +16,7 @@ v17ut-touch/
   Resources/               # Info.plist + app icon (bundle assets)
   scripts/                 # make-app.sh (bundle), release.sh (sign+notarize)
   Sources/
-    GestureKit/            # our clean-room trackpad-gesture synth (C)
+    GestureKit/            # trackpad-gesture synth (C)
       include/GestureKit.h
       GestureKit.c         # gk_post_fields + capture dump
     Gatecaster/            # the app (Swift)
@@ -100,8 +100,7 @@ touchscreen maps to (so the cursor lands on the V17UT, not your main screen).
 - 3 fingers: Mission Control / Spaces (Ctrl+arrow).
 
 Default right-click is **two-finger tap** (changeable). Pinch/rotate use the
-clean-room `GestureKit` synth (the working, no-crash recipe — the old IOHID graft
-is gone).
+`GestureKit` synth (the working, no-crash recipe — the old IOHID graft is gone).
 
 ## Settings & calibration
 

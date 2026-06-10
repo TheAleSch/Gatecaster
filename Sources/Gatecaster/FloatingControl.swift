@@ -9,6 +9,7 @@ struct FloatingControlView: View {
     @ObservedObject var settings: AppSettings
     var onKeyboard: () -> Void
     var onTrackpad: () -> Void
+    var onDeck: () -> Void
     var onSettings: () -> Void
     var onCollapse: () -> Void
 
@@ -29,11 +30,12 @@ struct FloatingControlView: View {
                 ctlButton("rectangle.and.hand.point.up.left", "Pad", action: onTrackpad)
             }
             HStack(spacing: 8) {
+                ctlButton("square.grid.2x2", "Deck", action: onDeck)
                 ctlButton("hand.tap", settings.gestureMode.label, action: cycleMode)
-                ctlButton("gearshape", "Settings", action: onSettings)
             }
+            ctlButton("gearshape", "Settings", wide: true, action: onSettings)
         }
-        .frame(width: 160, height: 160)
+        .frame(width: 160, height: 210)
         .gcActiveBlur(cornerRadius: 22)
     }
 

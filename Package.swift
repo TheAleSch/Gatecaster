@@ -5,7 +5,7 @@ let package = Package(
     name: "Gatecaster",
     platforms: [.macOS(.v13)],
     targets: [
-        // Clean-room gesture-synthesis (original implementation).
+        // Gesture-synthesis target (original implementation).
         .target(
             name: "GestureKit",
             path: "Sources/GestureKit"

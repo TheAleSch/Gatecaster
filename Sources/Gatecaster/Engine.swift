@@ -4,7 +4,7 @@ import Foundation
 
 /// Turns Report ID 1 packets into macOS input: pointer / click / drag,
 /// press-and-hold right-click, two-finger momentum scroll, and continuous
-/// pinch-zoom + rotate via the clean-room gesture synth.
+/// pinch-zoom + rotate via the GestureKit gesture synth.
 final class Engine {
     private let s = AppSettings.shared      // all tunables / modes / calibration live here
     var bounds: CGRect = CGDisplayBounds(CGMainDisplayID())
