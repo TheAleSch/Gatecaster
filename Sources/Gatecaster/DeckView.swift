@@ -529,24 +529,38 @@ private struct PageChip: View {
     @State private var draft = ""
 
     var body: some View {
-        Text(name)
-            .font(.system(size: 12, weight: selected ? .semibold : .regular))
-            .padding(.horizontal, 12).padding(.vertical, 5)
-            .background(Capsule().fill(selected
-                ? Color.accentColor.opacity(0.85) : Color.secondary.opacity(0.15)))
-            .foregroundColor(selected ? .white : .primary)
-            .onLongPressGesture {
-                guard editing else { return }
-                draft = name; showRename = true
-            }
-            .popover(isPresented: $showRename) {
-                HStack {
-                    TextField("Page name", text: $draft)
-                        .textFieldStyle(.roundedBorder).frame(width: 160)
-                    Button("Save") { rename(draft); showRename = false }
+        HStack(spacing: 4) {
+            Text(name)
+                .font(.system(size: 12, weight: selected ? .semibold : .regular))
+            // Visible rename affordance — long-press alone is undiscoverable
+            // on a Mac (and invisible to touch users who never long-press).
+            if editing && selected {
+                Button {
+                    draft = name; showRename = true
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 10, weight: .semibold))
                 }
-                .padding(10)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Rename page")
             }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 5)
+        .background(Capsule().fill(selected
+            ? Color.accentColor.opacity(0.85) : Color.secondary.opacity(GC.Op.fillSubtle)))
+        .foregroundColor(selected ? .white : .primary)
+        .onLongPressGesture {
+            guard editing else { return }
+            draft = name; showRename = true
+        }
+        .popover(isPresented: $showRename) {
+            HStack {
+                TextField("Page name", text: $draft)
+                    .textFieldStyle(.roundedBorder).frame(width: 160)
+                Button("Save") { rename(draft); showRename = false }
+            }
+            .padding(10)
+        }
     }
 }
 
