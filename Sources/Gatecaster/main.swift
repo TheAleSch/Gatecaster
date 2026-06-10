@@ -700,10 +700,11 @@ final class AppController: NSObject, NSApplicationDelegate {
                                        onSettings: { [weak self] in self?.openSettings() },
                                        onCollapse: { [weak self] in self?.collapseFloating() })
         let host = GlassHostingView(rootView: view)
-        host.frame = NSRect(x: 0, y: 0, width: 160, height: 210)
+        host.frame = NSRect(x: 0, y: 0, width: 176, height: 232)
         let sf = floatingScreenFrame()
         panel.contentView = host
-        setFrameAnimated(panel, NSRect(x: sf.maxX - 200, y: sf.midY - 105, width: 160, height: 210))
+        // Keep the ~40px right-edge gap and vertical centring as the panel grew.
+        setFrameAnimated(panel, NSRect(x: sf.maxX - 216, y: sf.midY - 116, width: 176, height: 232))
     }
 
     private func collapseFloating() {
