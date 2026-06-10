@@ -210,7 +210,8 @@ private struct Card<Content: View>: View {
             content
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.10)))
+        .background(RoundedRectangle(cornerRadius: GC.Radius.tile)
+            .fill(Color.gray.opacity(GC.Op.hairline)))
     }
 }
 

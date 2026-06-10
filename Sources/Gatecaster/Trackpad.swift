@@ -122,7 +122,7 @@ struct TrackpadView: View {
             .background(TitleBarDrag())   // mouse: drag panel by title bar only
 
             ZStack {
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: GC.Radius.tile)
                     .fill(Color(nsColor: .controlColor).opacity(0.45))
                 VStack(spacing: 4) {
                     Image(systemName: "hand.point.up.left")
@@ -135,6 +135,6 @@ struct TrackpadView: View {
         .padding(8)
         // Always-live blur: Liquid Glass froze a stale snapshot when these
         // never-key panels lost focus (macOS 26), so all panels use this.
-        .gcActiveBlur(cornerRadius: 16, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
+        .gcActiveBlur(cornerRadius: GC.Radius.panel, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
     }
 }

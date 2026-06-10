@@ -55,16 +55,16 @@ struct DeckView: View {
         let op = theme.forcesOpaque ? 1.0 : settings.deckOpacity
         switch theme.background {
         case .blur:
-            Color.clear.gcActiveBlur(cornerRadius: 16)
+            Color.clear.gcActiveBlur(cornerRadius: GC.Radius.panel)
         case .solid(let hex):
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: GC.Radius.panel)
                 .fill(Color(hex: hex).opacity(op))
-                .overlay(RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: GC.Radius.panel)
+                    .strokeBorder(Color.primary.opacity(GC.Op.hairline), lineWidth: 1))
         case .gradient(let stops):
             ZStack {
-                Color.clear.gcActiveBlur(cornerRadius: 16)
-                RoundedRectangle(cornerRadius: 16)
+                Color.clear.gcActiveBlur(cornerRadius: GC.Radius.panel)
+                RoundedRectangle(cornerRadius: GC.Radius.panel)
                     .fill(LinearGradient(colors: stops.map { Color(hex: $0).opacity(op) },
                                          startPoint: .top, endPoint: .bottom))
             }
@@ -545,13 +545,13 @@ private struct AddCell: View {
 
     var body: some View {
         Button { show = true } label: {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: GC.Radius.tile)
                 .strokeBorder(Color.secondary.opacity(0.35),
                               style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
                 .overlay(Image(systemName: "plus")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.secondary.opacity(0.7)))
-                .contentShape(RoundedRectangle(cornerRadius: 12))
+                .contentShape(RoundedRectangle(cornerRadius: GC.Radius.tile))
         }
         .buttonStyle(.plain)
         .popover(isPresented: $show, arrowEdge: .bottom) {
@@ -711,7 +711,7 @@ private struct DeckButtonView: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: GC.Radius.tile)
                 .fill(isNeutral
                       ? Color(nsColor: .controlColor).opacity(pressed ? 0.6 : 1.0)
                       : Color(hex: button.colorHex).opacity(pressed ? 0.55 : 0.85))
@@ -740,7 +740,7 @@ private struct DeckButtonView: View {
             }
         }
         .aspectRatio(1, contentMode: .fit)
-        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: GC.Radius.tile))
         .onTapGesture {
             if editing { showEditor = true } else { fire() }
         }

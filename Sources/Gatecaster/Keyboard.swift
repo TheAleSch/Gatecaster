@@ -309,7 +309,7 @@ struct KeyboardView: View {
             }
         }
         .padding(8)
-        .gcActiveBlur(cornerRadius: 16, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
+        .gcActiveBlur(cornerRadius: GC.Radius.panel, blur: settings.panelBlur, opacity: settings.keyboardOpacity)
     }
 
     private var layoutRows: [[KeyDef]] { KeyboardLayouts.rows(for: settings.keyboardLayout) }
@@ -411,7 +411,7 @@ struct KeyboardView: View {
     }
 
     private func keyShape(special: Bool, active: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 6)
+        RoundedRectangle(cornerRadius: GC.Radius.key)
             .fill(active ? Color.accentColor
                          : Color(nsColor: .controlColor).opacity(special ? 0.55 : 1.0))
             .shadow(color: .black.opacity(0.15), radius: 0.5, y: 1)

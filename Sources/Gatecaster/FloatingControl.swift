@@ -36,7 +36,7 @@ struct FloatingControlView: View {
             ctlButton("gearshape", "Settings", wide: true, action: onSettings)
         }
         .frame(width: 160, height: 210)
-        .gcActiveBlur(cornerRadius: 22)
+        .gcActiveBlur(cornerRadius: GC.Radius.panel)
     }
 
     private func cycleMode() {
@@ -68,7 +68,7 @@ struct FloatingTabView: View {
             Image(systemName: "chevron.left.2")
                 .font(.system(size: 22, weight: .bold))
                 .frame(width: 48, height: 170)
-                .gcActiveBlur(cornerRadius: 14)
+                .gcActiveBlur(cornerRadius: GC.Radius.panel)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

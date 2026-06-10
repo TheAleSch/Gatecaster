@@ -368,11 +368,11 @@ struct WidgetTile: View {
             // The gear/trash/resize overlays are added AFTER this, so they stay live.
             .allowsHitTesting(!editing)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(RoundedRectangle(cornerRadius: 14)
+            .background(RoundedRectangle(cornerRadius: GC.Radius.tile)
                 .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6)))
-            .overlay(RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: GC.Radius.tile)
+                .strokeBorder(Color.primary.opacity(GC.Op.hairline), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: GC.Radius.tile))
             .overlay(alignment: .topLeading) { if previewW != nil { resizeGhost } }
             .overlay(alignment: .topTrailing) { if editing { editControls } }
             .overlay(alignment: .bottomTrailing) { if editing { resizeHandle } }
@@ -384,9 +384,10 @@ struct WidgetTile: View {
     private var resizeGhost: some View {
         let w = previewW ?? widget.spanW
         let h = previewH ?? widget.spanH
-        return RoundedRectangle(cornerRadius: 14)
+        return RoundedRectangle(cornerRadius: GC.Radius.tile)
             .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-            .background(RoundedRectangle(cornerRadius: 14).fill(Color.accentColor.opacity(0.12)))
+            .background(RoundedRectangle(cornerRadius: GC.Radius.tile)
+                .fill(Color.accentColor.opacity(0.12)))
             .frame(width: ghostSize(w), height: ghostSize(h), alignment: .topLeading)
             .overlay(alignment: .bottomTrailing) {
                 Text("\(w)×\(h)")
