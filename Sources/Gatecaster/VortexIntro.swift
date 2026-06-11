@@ -142,13 +142,36 @@ enum VortexShader {
             float ob = 1.0 + 2.70158*pow(u-1.0,3.0) + 1.70158*pow(u-1.0,2.0);
             float2 hsz = U.win*0.5 * max(ob, 0.02);
             float sd = roundRectSD(sp, hsz, 18.0);
-            float inside = smoothstep(1.5, -1.5, sd);
-            col *= mix(1.0, 0.05, reveal * (1.0-inside));
-            col = mix(col, float3(0.01), inside*reveal*0.94);
+            // crisp edge: ~1px antialias band only (was a 3px band that read as a blurred border).
+            float inside = smoothstep(1.0, -1.0, sd);
+            // top-lit normalized height (top-left origin → -sp.y is "up"); drives both the
+            // glass gradient and the rim sheen so the panel looks lit from above.
+            float gy = clamp(-sp.y / max(hsz.y, 1.0) * 0.5 + 0.5, 0.0, 1.0);
+
+            // Once the reveal lands, fade EVERYTHING outside the panel to pure black over
+            // 0.8s so only the modal remains. easeS clamps to 0 until t passes DIVE_END.
+            float endFade  = easeS((t - DIVE_END) / 0.8);
+            float outFloor = mix(0.05, 0.0, endFade);
+            col *= mix(1.0, outFloor, reveal * (1.0 - inside));
+
+            // frosted dark-glass interior: a subtle top-lit base instead of flat black.
+            float3 glassBase = mix(float3(0.012), float3(0.05), gy);
+            col = mix(col, glassBase, inside * reveal * 0.94);
+
+            // calm stars seen THROUGH the glass: displaced by fbm (refraction) and dimmer.
             float em = easeS((t-SUCK_END)/1.4);
-            float cf = calmField(sp, t);
-            col += float3(cf) * inside * em * reveal;
-            col += float3(1.0) * exp(-abs(sd)*0.35) * reveal * 0.18;
+            float2 gwarp = (float2(fbm(sp*0.012 + t*0.05),
+                                   fbm(sp*0.012 - 5.0 - t*0.04)) - 0.5) * 16.0;
+            float cf = calmField(sp + gwarp, t);
+            col += float3(cf) * inside * em * reveal * 0.85;
+
+            // specular sheen hugging the top rim — the liquid-glass highlight.
+            float sheen = smoothstep(0.62, 1.0, gy) * inside;
+            col += float3(1.0) * sheen * reveal * 0.045;
+
+            // crisp ~1.5px rim line (replaces the old wide exp glow that read as blur).
+            float rim = 1.0 - smoothstep(0.0, 1.5, abs(sd));
+            col += float3(1.0) * rim * reveal * 0.5;
         }
 
         return float4(col, 1.0);
