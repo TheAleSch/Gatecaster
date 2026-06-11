@@ -133,6 +133,11 @@ final class AppSettings: ObservableObject {
     @Published var displayID = 0.0      // CGDirectDisplayID for the live session (not stable)
     @Published var displayUUID = ""     // STABLE id, persisted + resolved across relaunch/reconnect
 
+    // MARK: onboarding (first-run assistant)
+    @Published var hasOnboarded = false   // full Welcome→Calibration flow completed (or migrated)
+    @Published var onboardingStage = 0    // resume point across the TCC-mandated relaunch
+                                          // 0 welcome, 1 permissions, 2 monitor, 3 calibration
+
     // Derived sign (natural applies identically to one- and two-finger scroll).
     var scrollSign: Double { naturalScroll ? 1 : -1 }
 
@@ -151,6 +156,8 @@ final class AppSettings: ObservableObject {
         var hasPickedDisplay: Bool
         var displayID: Double
         var displayUUID: String?
+        var hasOnboarded: Bool?       // optional: absent in pre-onboarding settings files
+        var onboardingStage: Int?
         var edgeGestures: Bool?
         var edgeDwellMS: Double?
         var edgePull: Double?
@@ -206,6 +213,7 @@ final class AppSettings: ObservableObject {
                  restoreDelayMS: restoreDelayMS, pageSwipePts: pageSwipePts,
                  calXMin: calXMin, calXMax: calXMax, calYMin: calYMin, calYMax: calYMax,
                  hasPickedDisplay: hasPickedDisplay, displayID: displayID, displayUUID: displayUUID,
+                 hasOnboarded: hasOnboarded, onboardingStage: onboardingStage,
                  edgeGestures: edgeGestures, edgeDwellMS: edgeDwellMS, edgePull: edgePull,
                  edgeZonePts: edgeZonePts, showEdgeZones: showEdgeZones,
                  keyboardOpacity: keyboardOpacity, keyboardExtendedKeys: keyboardExtendedKeys,
@@ -239,6 +247,11 @@ final class AppSettings: ObservableObject {
         calXMin = s.calXMin; calXMax = s.calXMax; calYMin = s.calYMin; calYMax = s.calYMax
         hasPickedDisplay = s.hasPickedDisplay; displayID = s.displayID
         displayUUID = s.displayUUID ?? ""
+        // MIGRATION: settings files from before onboarding existed have no
+        // hasOnboarded key. A user who already picked a display has a working
+        // setup — never funnel them through the full first-run flow.
+        hasOnboarded = s.hasOnboarded ?? s.hasPickedDisplay
+        onboardingStage = s.onboardingStage ?? 0
         edgeGestures = s.edgeGestures ?? true
         edgeDwellMS = s.edgeDwellMS ?? 0
         edgePull = s.edgePull ?? 30
@@ -292,6 +305,7 @@ final class AppSettings: ObservableObject {
         magnifyGain: 3.0, twoCommit: 12, pinchBias: 1.6, restoreDelayMS: 20, pageSwipePts: 110,
         calXMin: 0, calXMax: 2624, calYMin: 0, calYMax: 1856,
         hasPickedDisplay: false, displayID: 0, displayUUID: "",
+        hasOnboarded: false, onboardingStage: 0,
         edgeGestures: true, edgeDwellMS: 0, edgePull: 30, edgeZonePts: 72,
         showEdgeZones: false, keyboardOpacity: 0.85,
         keyboardExtendedKeys: true, keyboardLayout: "us", keyboardNumpad: false,
