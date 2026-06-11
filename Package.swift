@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Gatecaster",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS("26.0")],   // Liquid Glass (glassEffect) + the touch API floor
     targets: [
         // Gesture-synthesis target (original implementation).
         .target(

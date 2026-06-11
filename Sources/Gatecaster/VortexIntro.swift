@@ -148,11 +148,10 @@ enum VortexShader {
             // glass gradient and the rim sheen so the panel looks lit from above.
             float gy = clamp(-sp.y / max(hsz.y, 1.0) * 0.5 + 0.5, 0.0, 1.0);
 
-            // Once the reveal lands, fade EVERYTHING outside the panel to pure black over
-            // 0.8s so only the modal remains. easeS clamps to 0 until t passes DIVE_END.
-            float endFade  = easeS((t - DIVE_END) / 0.8);
-            float outFloor = mix(0.05, 0.0, endFade);
-            col *= mix(1.0, outFloor, reveal * (1.0 - inside));
+            // Dim outside the panel as it pops. The controller fades the whole Metal
+            // view out afterward (revealDesktop) to uncover the live desktop, so the
+            // shader itself need not drive the outside to black.
+            col *= mix(1.0, 0.05, reveal * (1.0 - inside));
 
             // frosted dark-glass interior: a subtle top-lit base instead of flat black.
             float3 glassBase = mix(float3(0.012), float3(0.05), gy);

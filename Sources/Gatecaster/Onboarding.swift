@@ -49,8 +49,12 @@ final class OnboardingController {
         let win = KeyableWindow(contentRect: frame, styleMask: .borderless,
                                 backing: .buffered, defer: false)
         win.level = .normal       // System Settings / TCC prompts must be able to cover us
-        win.isOpaque = true
-        win.backgroundColor = .black
+        // Non-opaque from the start: during the intro the Metal view renders opaque
+        // black so the screen looks like dark space; once the vortex finishes we fade
+        // that view out and the clear window lets the desktop show behind the glass panel.
+        win.isOpaque = false
+        win.backgroundColor = .clear
+        win.hasShadow = false
         win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let container = NSView(frame: NSRect(origin: .zero, size: frame.size))
@@ -64,9 +68,10 @@ final class OnboardingController {
             if reduceMotion || resumeAt != nil { r.skipToEnd() }
             r.onTick = { [weak self] t in
                 guard let self = self, !self.model.introDone, t >= 6.0 else { return }
-                self.model.introDone = true
+                self.finishIntro(animated: true)
             }
             mtk.autoresizingMask = [.width, .height]
+            mtk.layer?.isOpaque = false   // so fading the view's alpha reveals the desktop, not black
             container.addSubview(mtk)
         } else {
             model.introDone = true   // static fallback: show content immediately
@@ -94,6 +99,10 @@ final class OnboardingController {
         NSApp.activate(ignoringOtherApps: true)
         win.makeKeyAndOrderFront(nil)
 
+        // Reduce-Motion / resume / no-Metal paths already set introDone — drop straight
+        // to the glass panel with no vortex by removing the (black) Metal view now.
+        if model.introDone { revealDesktop(animated: false) }
+
         // Any key during the intro skips it; number keys pick a display on the
         // monitor step. Local monitor only — no nextEvent loops (HID deadlock).
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] ev in
@@ -111,7 +120,36 @@ final class OnboardingController {
 
     func skipIntro() {
         renderer?.skipToEnd()
+        finishIntro(animated: true)
+    }
+
+    /// Mark the intro complete exactly once, then crossfade the Metal view out so the
+    /// step content lands on the real glass panel over the revealed desktop.
+    private func finishIntro(animated: Bool) {
+        guard !model.introDone else { return }
         model.introDone = true
+        revealDesktop(animated: animated)
+    }
+
+    /// Fade (or instantly drop) the vortex view. Because the window is non-opaque,
+    /// dropping the view's alpha reveals the live desktop behind the glass panel.
+    /// Removing the view also stops its 60fps draw loop.
+    private func revealDesktop(animated: Bool) {
+        guard let mtk = mtkView else { return }
+        guard animated else {
+            mtk.isPaused = true
+            mtk.removeFromSuperview()
+            mtkView = nil
+            return
+        }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.8
+            mtk.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            self?.mtkView?.isPaused = true
+            self?.mtkView?.removeFromSuperview()
+            self?.mtkView = nil
+        })
     }
 
     private func advance() {
@@ -244,13 +282,23 @@ struct OnboardingView: View {
     var body: some View {
         ZStack {
             if model.introDone {
-                content
-                    .frame(width: modalSize.width, height: modalSize.height)
+                glassPanel
                     .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.easeIn(duration: 0.5), value: model.introDone)
+    }
+
+    /// The step content on a REAL macOS Liquid Glass panel. The intro's Metal view
+    /// is faded out by the controller once introDone, so this glass vibrancy-blurs the
+    /// live desktop behind the (now transparent) window — a regular floating glass panel.
+    private var glassPanel: some View {
+        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        return content
+            .frame(width: modalSize.width, height: modalSize.height)
+            .glassEffect(.regular, in: shape)
+            .overlay(shape.strokeBorder(.white.opacity(0.14), lineWidth: 1))
     }
 
     @ViewBuilder private var content: some View {
