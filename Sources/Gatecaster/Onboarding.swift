@@ -26,6 +26,7 @@ final class OnboardingController {
     private var window: KeyableWindow?
     private var renderer: VortexRenderer?
     private weak var mtkView: MTKView?   // weak: owned by the window's container; kept only to pause on teardown
+    private var cardSize: CGSize = .zero  // centered rect the starfield mask collapses into
     private var badgeWindows: [NSWindow] = []
     private var keyMonitor: Any?
 
@@ -45,18 +46,29 @@ final class OnboardingController {
         // Modal size: spec's Raycast-like ~780×620, clamped on small screens.
         let winSize = CGSize(width: min(780, frame.width * 0.6),
                              height: min(620, frame.height * 0.75))
+        cardSize = winSize   // the mask collapses the starfield to exactly this centered rect
 
         let win = KeyableWindow(contentRect: frame, styleMask: .borderless,
                                 backing: .buffered, defer: false)
         win.level = .normal       // System Settings / TCC prompts must be able to cover us
-        // Pure-black backdrop the whole time: the welcome step shows the calm starfield
-        // on black; leaving welcome fades the Metal view out to this same black window
-        // background. (No desktop is ever revealed — the bg stays 100% black.)
-        win.isOpaque = true
-        win.backgroundColor = .black
+        // Non-opaque so the dimmed desktop shows around the card on the step screens.
+        // During the intro and the welcome step the full-screen Metal view renders
+        // opaque black+stars (hiding the desktop); collapsing the starfield into the
+        // card later uncovers the dim scrim over the live desktop.
+        win.isOpaque = false
+        win.backgroundColor = .clear
+        win.hasShadow = false
         win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let container = NSView(frame: NSRect(origin: .zero, size: frame.size))
+
+        // Dim scrim over the live desktop, revealed around the card once the starfield
+        // collapses. On the intro/welcome it's hidden behind the full-screen Metal view.
+        let scrim = NSView(frame: container.bounds)
+        scrim.wantsLayer = true
+        scrim.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.45).cgColor
+        scrim.autoresizingMask = [.width, .height]
+        container.addSubview(scrim)
 
         // Reduce Motion (or Metal unavailable / MSL compile failure) → static
         // path: no vortex, content fades in over black. Never block onboarding.
@@ -98,8 +110,8 @@ final class OnboardingController {
         win.makeKeyAndOrderFront(nil)
 
         // Reduce-Motion / resume / no-Metal paths already set introDone. The welcome
-        // step keeps its starfield; any later resume step starts on the plain black bg.
-        if model.introDone && model.stage != .welcome { revealDesktop(animated: false) }
+        // step keeps the full-screen starfield; a later resume step starts collapsed.
+        if model.introDone && model.stage != .welcome { collapseStarsToCard(animated: false) }
 
         // Any key during the intro skips it; number keys pick a display on the
         // monitor step. Local monitor only — no nextEvent loops (HID deadlock).
@@ -121,32 +133,41 @@ final class OnboardingController {
         finishIntro(animated: true)
     }
 
-    /// Mark the intro complete exactly once. Keep the calm starfield on the welcome
-    /// step; it's only cleared (faded to black) once the user moves past welcome (setStage).
+    /// Mark the intro complete exactly once. The welcome step keeps the full-screen
+    /// starfield; only on a later (resume) stage do we collapse it into the card.
     private func finishIntro(animated: Bool) {
         guard !model.introDone else { return }
         model.introDone = true
-        if model.stage != .welcome { revealDesktop(animated: animated) }
+        if model.stage != .welcome { collapseStarsToCard(animated: animated) }
     }
 
-    /// Fade (or instantly drop) the vortex/starfield view to the black window bg.
-    /// Used when leaving the welcome step. Removing the view also stops its 60fps loop.
-    private func revealDesktop(animated: Bool) {
-        guard let mtk = mtkView else { return }
-        guard animated else {
-            mtk.isPaused = true
-            mtk.removeFromSuperview()
-            mtkView = nil
-            return
+    /// Collapse the full-screen starfield into the centered card rect by animating a
+    /// rounded-rect mask on the Metal layer. The view keeps drawing (stars twinkle in
+    /// the card); outside the card the dim scrim + live desktop show through.
+    private func collapseStarsToCard(animated: Bool) {
+        guard let mtk = mtkView, let layer = mtk.layer else { return }
+        let full = mtk.bounds
+        let card = CGRect(x: (full.width  - cardSize.width)  / 2,
+                          y: (full.height - cardSize.height) / 2,
+                          width: cardSize.width, height: cardSize.height)
+        // A tiny radius on the full path keeps the same path structure as the card path,
+        // so the morph interpolates smoothly instead of snapping.
+        let fullPath = CGPath(roundedRect: full, cornerWidth: 0.01, cornerHeight: 0.01, transform: nil)
+        let cardPath = CGPath(roundedRect: card, cornerWidth: 20, cornerHeight: 20, transform: nil)
+        let mask: CAShapeLayer
+        if let existing = layer.mask as? CAShapeLayer {
+            mask = existing
+        } else {
+            mask = CAShapeLayer(); mask.path = fullPath; layer.mask = mask
         }
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.8
-            mtk.animator().alphaValue = 0
-        }, completionHandler: { [weak self] in
-            self?.mtkView?.isPaused = true
-            self?.mtkView?.removeFromSuperview()
-            self?.mtkView = nil
-        })
+        guard animated else { mask.path = cardPath; return }
+        let anim = CABasicAnimation(keyPath: "path")
+        anim.fromValue = mask.presentation()?.path ?? mask.path ?? fullPath
+        anim.toValue = cardPath
+        anim.duration = 0.7
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        mask.path = cardPath
+        mask.add(anim, forKey: "collapse")
     }
 
     private func advance() {
@@ -164,8 +185,9 @@ final class OnboardingController {
     }
 
     private func setStage(_ s: OnboardingStage) {
-        // Leaving the welcome step uncovers the desktop: fade the starfield out once.
-        if s != .welcome { revealDesktop(animated: true) }
+        // Leaving the welcome step: collapse the full-screen starfield into the card,
+        // uncovering the dim desktop around it (no-op once already collapsed).
+        if s != .welcome { collapseStarsToCard(animated: true) }
         model.stage = s
         settings.onboardingStage = s.rawValue   // relaunch resumes here
         settings.save()
@@ -277,12 +299,11 @@ struct OnboardingView: View {
 
     @State private var permTick = false
     private let permPoll = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack {
             if model.introDone {
-                solidPanel
+                cardPanel
                     .transition(.opacity)
             }
         }
@@ -290,18 +311,18 @@ struct OnboardingView: View {
         .animation(.easeIn(duration: 0.5), value: model.introDone)
     }
 
-    /// Solid step card that follows the system appearance: near-black in dark mode,
-    /// off-white in light mode. (On the welcome step the calm starfield shows around it
-    /// on black; on later steps the Metal view has faded out to the black backdrop.)
-    private var panelFill: Color { colorScheme == .dark ? Color(white: 0.12) : Color(white: 0.94) }
-
-    private var solidPanel: some View {
+    /// The card is a TRANSPARENT frame the exact size of the masked starfield behind it:
+    /// the Metal stars show inside, the dim desktop shows outside. A thin rim defines the
+    /// edge on the step screens; the welcome step is full-screen, so it gets no rim.
+    private var cardPanel: some View {
         let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
         return content
             .frame(width: modalSize.width, height: modalSize.height)
-            .background(shape.fill(panelFill))
-            .overlay(shape.strokeBorder(.primary.opacity(0.10), lineWidth: 1))
-            .shadow(color: .black.opacity(0.35), radius: 30, y: 10)
+            .overlay {
+                if model.stage != .welcome {
+                    shape.strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                }
+            }
     }
 
     @ViewBuilder private var content: some View {
@@ -327,23 +348,21 @@ struct OnboardingView: View {
         HStack(spacing: 8) {
             ForEach(0..<4, id: \.self) { i in
                 Circle()
-                    .fill(i == model.stage.rawValue ? Color.primary : Color.primary.opacity(0.22))
+                    .fill(i == model.stage.rawValue ? Color.white : Color.white.opacity(0.22))
                     .frame(width: 6, height: 6)
             }
         }
     }
 
-    /// High-contrast primary button, flat fill (no gradient), inverting with the
-    /// appearance: white button / black text in dark mode, the reverse in light mode.
+    /// Flat white primary button (no gradient). The card interior is always the dark
+    /// starfield, so a fixed white-on-black button reads correctly regardless of mode.
     private func cta(_ title: String, action: @escaping () -> Void) -> some View {
-        let fg: Color = colorScheme == .dark ? .black : .white
-        let bg: Color = colorScheme == .dark ? .white : .black
-        return Button(action: action) {
+        Button(action: action) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(fg)
+                .foregroundColor(.black)
                 .frame(width: 200, height: 38)
-                .background(bg)
+                .background(Color.white)
                 .cornerRadius(9)
         }
         .buttonStyle(.plain)
@@ -368,7 +387,7 @@ struct OnboardingView: View {
             cta("Get Started") { advance() }
             Spacer().frame(height: 18)
         }
-        .foregroundColor(.primary)
+        .foregroundColor(.white)
     }
 
     private func featureRow(_ icon: String, _ title: String, _ detail: String) -> some View {
@@ -390,7 +409,7 @@ struct OnboardingView: View {
             Spacer().frame(height: 8)
             PermissionsView()                      // shared live checklist (Task 2)
                 .padding(18)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06)))
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.06)))
                 .frame(maxWidth: 460)
             Spacer()
             cta("Continue") { advance() }
@@ -398,7 +417,7 @@ struct OnboardingView: View {
                 .opacity(permissionsGranted ? 1 : 0.4)
             Spacer().frame(height: 18)
         }
-        .foregroundColor(.primary)
+        .foregroundColor(.white)
         .onReceive(permPoll) { _ in permTick.toggle() }   // re-evaluate permissionsGranted
     }
 
@@ -423,7 +442,7 @@ struct OnboardingView: View {
                             Text("\(d.number)")
                                 .font(.system(size: 20, weight: .bold))
                                 .frame(width: 36, height: 36)
-                                .background(Circle().fill(Color.primary.opacity(0.12)))
+                                .background(Circle().fill(Color.white.opacity(0.12)))
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(d.name).font(.system(size: 13, weight: .medium))
                                 Text(d.size).font(.system(size: 11)).opacity(0.55)
@@ -432,7 +451,7 @@ struct OnboardingView: View {
                             Image(systemName: "chevron.right").opacity(0.4)
                         }
                         .padding(.horizontal, 14).padding(.vertical, 9)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.06)))
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.06)))
                     }
                     .buttonStyle(.plain)
                 }
@@ -441,7 +460,7 @@ struct OnboardingView: View {
             Spacer()
             Spacer().frame(height: 18)
         }
-        .foregroundColor(.primary)
+        .foregroundColor(.white)
     }
 
     private var calibration: some View {
@@ -461,7 +480,7 @@ struct OnboardingView: View {
                 .padding(.top, 4)
             Spacer().frame(height: 18)
         }
-        .foregroundColor(.primary)
+        .foregroundColor(.white)
     }
 
     private var doneCard: some View {
@@ -477,6 +496,6 @@ struct OnboardingView: View {
             cta("Finish") { finish() }
             Spacer().frame(height: 18)
         }
-        .foregroundColor(.primary)
+        .foregroundColor(.white)
     }
 }
