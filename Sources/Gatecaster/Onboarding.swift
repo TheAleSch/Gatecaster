@@ -1,6 +1,7 @@
 import Cocoa
 import SwiftUI
 import IOKit.hid
+import MetalKit
 
 /// Stages persist in AppSettings.onboardingStage so the TCC-mandated relaunch
 /// resumes where the user left off.
@@ -24,6 +25,7 @@ final class OnboardingController {
     private let settings: AppSettings
     private var window: KeyableWindow?
     private var renderer: VortexRenderer?
+    private weak var mtkView: MTKView?   // weak: owned by the window's container; kept only to pause on teardown
     private var badgeWindows: [NSWindow] = []
     private var keyMonitor: Any?
 
@@ -58,6 +60,7 @@ final class OnboardingController {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if let (mtk, r) = makeVortexView(frame: container.bounds, windowSize: winSize) {
             renderer = r
+            mtkView = mtk
             if reduceMotion || resumeAt != nil { r.skipToEnd() }
             r.onTick = { [weak self] t in
                 guard let self = self, !self.model.introDone, t >= 6.0 else { return }
@@ -192,6 +195,9 @@ final class OnboardingController {
     /// AppController calls this from endCalibration().
     func calibrationFinished() {
         guard model.calibrationRunning else { return }
+        // NOTE: the done card is deliberately not resume-persistent — onboardingStage
+        // stays at .calibration. If the app is killed before "Finish", relaunch resumes
+        // on the (re-runnable) calibration step rather than a dangling success screen.
         model.calibrationRunning = false
         model.finished = true
         window?.makeKeyAndOrderFront(nil)
@@ -208,6 +214,9 @@ final class OnboardingController {
     func teardown() {
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         hideBadges()
+        mtkView?.isPaused = true      // stop the 60fps draw loop even if the window lingers in an autorelease pool
+        mtkView?.delegate = nil       // break the (weak) delegate link so the renderer can't be re-entered
+        mtkView = nil
         window?.orderOut(nil)
         window = nil
         renderer = nil
