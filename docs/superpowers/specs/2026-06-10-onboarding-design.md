@@ -60,22 +60,44 @@ Full-screen borderless window on the main display, pure black. Approved look
 is the WebGL demo `vortex-shader-v5.html`; the Swift implementation ports its
 fragment shader to Metal.
 
-**Timeline** (seconds): `0–1.6` stars fade in and fill the screen →
-`1.6–4.6` vortex suck (inverse-mapped spiral, chromatic aberration, tangential
-star stretching, shrinking event-horizon ring) → `4.6–5.6` horizon flash +
-window reveal → starfield stays confined inside the centered window; welcome
-text fades in.
+Reference implementation (port 1:1): `vortex-final.html` in the brainstorm
+session dir (`.superpowers/brainstorm/71582-1781147118/content/`).
+
+**Timeline** (seconds, total 6 s): `0–1.6` stars fade in and fill the screen
+→ `1.6–4.6` vortex suck (inverse-mapped spiral, chromatic aberration,
+tangential star stretching) → `4.6–6.0` **dive + reveal together**: the
+camera plunges into the vortex (world coords shrink to ×0.08) while the
+modal simultaneously pops out of the center with an easeOutBack overshoot
+and the welcome text fades in as the pop settles. No end flash. Starfield
+stays confined inside the window, twinkling indefinitely (animation clock
+never stops).
 
 **Visual rules:**
 
-- **Black & white only** — stars, ring, glow, window chrome all monochrome.
-  The *only* color is chromatic aberration: per-channel swirl offsets on
-  stars and ±radius offsets on the horizon ring.
-- Small stars, pure-black background, exaggerated distortion (v5 tuning:
-  swirl up to 11 turns, inward rush `r*7 + 80`, stretch clamp up to 14 with
-  anisotropic falloff ×7/×34, aberration `0.2 · clamp(340/r, 0, 6)`).
-- Log-polar procedural starfield (seam-free angular wrap), rounded-rect SDF
-  masks the confined window region after reveal.
+- **The vortex is invisible** — no event-horizon ring, no halo, no tunnel
+  interior. You only see space itself bend: glass distortion (wavy fbm
+  displacement of sampling coords, strongest near the virtual horizon) and
+  gravitational lens warp (stars bow around the core).
+- **Black & white only** — stars, glow, window chrome all monochrome. The
+  *only* color is chromatic aberration: per-channel swirl offsets on stars.
+- Small stars, pure-black background. Log-polar procedural starfield
+  (seam-free angular wrap), rounded-rect SDF masks the confined window
+  region during reveal.
+
+**Locked shader constants** (from the approved demo):
+
+| Constant | Value | Meaning |
+|---|---|---|
+| swirl turns `SW` | 12 | suck-phase rotation |
+| kepler profile | `min(140/(r+70), 2.5)` | inner stars orbit fast (1/r), outer crawl |
+| inward rush `RUSH` | 14 | radial sample growth during suck |
+| star stretch `STR` | 30 | tangential streak cap (anisotropy ×7/×34) |
+| aberration `AB` | 0.26 | `suck · clamp(340/r, 0, 6) · AB` |
+| lens warp `LENS` | 8 | `suck · hr²·LENS / (r² + hr²/2)` |
+| glass amount `GAMP` | 110 px | fbm displacement, mask `exp(-|r−hr|/(hr·1.6))` |
+| glass scale `GFREQ` | 0.03 | fbm ripple frequency |
+| dive depth `DIVEZ` | 0.08 | end-of-dive world zoom |
+| virtual horizon `hr` | `26 + 40·(1−suck)` | drives glass/lens falloff only (never drawn) |
 
 **Tech:** `MTKView` + fragment shader. MSL source is a Swift string compiled
 at runtime via `device.makeLibrary(source:)` — no `.metal` build phase, no
