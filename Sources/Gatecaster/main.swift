@@ -2,6 +2,7 @@ import Cocoa
 import CoreGraphics
 import SwiftUI
 import Combine
+import IOKit.hid
 
 final class AppController: NSObject, NSApplicationDelegate {
     let settings = AppSettings.shared
@@ -13,6 +14,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var calibrationWindow: NSWindow?
     private var calController: CalibrationController?
+    private var onboarding: OnboardingController?
     private var selectedDisplay = CGMainDisplayID()
     private var pickerWindows: [NSWindow] = []
     private var keyMonitor: Any?
@@ -53,10 +55,9 @@ final class AppController: NSObject, NSApplicationDelegate {
         rebuildMenu()
         observeSettingsRequests()
 
-        // Without Accessibility, every event we post is silently dropped — ask up
-        // front instead of looking broken. (Input Monitoring is prompted by HID.)
-        let axOpts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        if !AXIsProcessTrustedWithOptions(axOpts) {
+        // Permission prompting now lives in onboarding's Permissions step;
+        // just log so a headless launch isn't silently dead.
+        if !AXIsProcessTrusted() {
             FileHandle.standardError.write(
                 Data("[gatecaster] waiting for Accessibility permission…\n".utf8))
         }
@@ -82,17 +83,21 @@ final class AppController: NSObject, NSApplicationDelegate {
         engine.start()
         hid.start()
 
-        // Resolve the saved monitor by its STABLE uuid. If it's connected, use it
-        // (no prompt). If we'd picked one before but it's genuinely absent and there's
-        // more than one screen to choose from, ask again. First run → ask.
-        if let id = displayID(forUUID: settings.displayUUID) {
-            applyDisplay(id)
-        } else if settings.hasPickedDisplay && NSScreen.screens.count > 1 {
-            startDisplayPicker()
-        } else if settings.hasPickedDisplay {
-            applyDisplay(CGMainDisplayID())   // single screen: just use it, don't nag
+        // First-run (or resumed) onboarding replaces the bare display picker.
+        // Existing users with everything granted never see it (hasOnboarded is
+        // migrated from hasPickedDisplay). Existing users MISSING a permission
+        // get dropped directly on the Permissions step — no intro, no welcome.
+        let permissionsOK = AXIsProcessTrusted() &&
+            IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+        if !settings.hasOnboarded {
+            // Mid-flow relaunch (TCC grant) resumes at the persisted stage.
+            let resume = settings.onboardingStage > 0
+                ? OnboardingStage(rawValue: settings.onboardingStage) : nil
+            startOnboarding(resumeAt: resume)
+        } else if !permissionsOK {
+            startOnboarding(resumeAt: .permissions)
         } else {
-            startDisplayPicker()
+            resolveSavedDisplay()
         }
 
         // Apply the chosen display whenever it changes from the Settings dropdown,
@@ -186,6 +191,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         item(menu, "Show / Hide Floating Control", #selector(toggleFloatingControl))
         item(menu, "Choose Touchscreen Display…", #selector(startDisplayPicker))
         item(menu, "Calibrate Touchscreen…", #selector(startCalibration))
+        item(menu, "Setup Assistant…", #selector(startSetupAssistant))
         item(menu, "Reconnect Touchscreen", #selector(reconnectTouch))
 
         menu.addItem(.separator())
@@ -275,6 +281,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         // falls back to main while it's gone.
         if let id = displayID(forUUID: settings.displayUUID) { applyDisplay(id) }
         else { applyDisplay(CGMainDisplayID()) }
+        onboarding?.screensChanged()        // monitor step refreshes rows + badges
     }
 
     // MARK: keep touch UI on the touch display
@@ -776,6 +783,56 @@ final class AppController: NSObject, NSApplicationDelegate {
         startCalibration()      // flow straight into corner calibration
     }
 
+    // MARK: onboarding
+    /// The old launch-time display resolution, reused after onboarding finishes.
+    private func resolveSavedDisplay() {
+        if let id = displayID(forUUID: settings.displayUUID) {
+            applyDisplay(id)
+        } else if settings.hasPickedDisplay && NSScreen.screens.count > 1 {
+            startDisplayPicker()
+        } else if settings.hasPickedDisplay {
+            applyDisplay(CGMainDisplayID())   // single screen: just use it, don't nag
+        } else {
+            startDisplayPicker()
+        }
+    }
+
+    private func startOnboarding(resumeAt: OnboardingStage?) {
+        guard onboarding == nil else { return }
+        let ob = OnboardingController(settings: settings)
+        ob.onPickDisplay = { [weak self] n in self?.onboardingPickDisplay(n) }
+        ob.onStartCalibration = { [weak self] in self?.startCalibration() }
+        ob.onFinished = { [weak self] in
+            guard let self = self else { return }
+            self.onboarding = nil
+            self.resolveSavedDisplay()   // bind whatever was picked (or re-ask)
+            self.rebuildMenu()
+        }
+        onboarding = ob
+        ob.show(resumeAt: resumeAt)
+    }
+
+    /// Setup Assistant menu item: full flow from the top, intro included.
+    @objc private func startSetupAssistant() {
+        settings.onboardingStage = 0
+        startOnboarding(resumeAt: nil)
+    }
+
+    /// Monitor-step pick: bind + persist, but do NOT auto-start calibration —
+    /// onboarding's Calibration step owns that handoff (it has its own intro).
+    private func onboardingPickDisplay(_ number: Int) {
+        let screens = NSScreen.screens
+        guard number >= 1, number <= screens.count else { return }
+        if let id = (screens[number - 1].deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
+                        as? NSNumber)?.uint32Value {
+            applyDisplay(id)
+            settings.displayID = Double(id)
+            settings.displayUUID = uuid(for: id) ?? ""
+            settings.hasPickedDisplay = true
+            settings.save()
+        }
+    }
+
     private func teardownDisplayPicker() {
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         pickerWindows.forEach { $0.orderOut(nil) }
@@ -815,6 +872,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         calibrationWindow?.orderOut(nil)
         calibrationWindow = nil
         calController = nil
+        onboarding?.calibrationFinished()   // onboarding shows its close-out card
     }
 
     // MARK: actions
