@@ -125,7 +125,10 @@ final class AppController: NSObject, NSApplicationDelegate {
             self, selector: #selector(panelFrameChanged(_:)),
             name: NSWindow.didResizeNotification, object: nil)
 
-        if settings.showFloatingControl { showFloatingControl() }
+        // Defer the launcher past onboarding: it's a .floating panel and would pop
+        // OVER the .normal-level onboarding window (the vortex). onFinished shows it
+        // once setup completes; already-onboarded launches (onboarding == nil) show now.
+        if settings.showFloatingControl && onboarding == nil { showFloatingControl() }
         floatBag = settings.$showFloatingControl.dropFirst().receive(on: RunLoop.main)
             .sink { [weak self] on in
                 if on { self?.showFloatingControl() } else { self?.hideFloatingControl() }
@@ -806,6 +809,8 @@ final class AppController: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             self.onboarding = nil
             self.resolveSavedDisplay()   // bind whatever was picked (or re-ask)
+            // Now that onboarding is gone, honor the default-on launcher (deferred at launch).
+            if self.settings.showFloatingControl { self.showFloatingControl() }
             self.rebuildMenu()
         }
         onboarding = ob

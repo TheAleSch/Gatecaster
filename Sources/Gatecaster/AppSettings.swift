@@ -309,7 +309,7 @@ final class AppSettings: ObservableObject {
         edgeGestures: true, edgeDwellMS: 0, edgePull: 30, edgeZonePts: 72,
         showEdgeZones: false, keyboardOpacity: 0.85,
         keyboardExtendedKeys: true, keyboardLayout: "us", keyboardNumpad: false,
-        showFloatingControl: false, showTrackpad: false, trackpadGain: 1.5,
+        showFloatingControl: true, showTrackpad: false, trackpadGain: 1.5,
         palmRejection: true, palmPanelGuard: true, palmClusterPts: 56,
         showDeck: false, panelBlur: true,
         keyPressFeedback: true, keyPopup: true, deckCellSize: 104,
