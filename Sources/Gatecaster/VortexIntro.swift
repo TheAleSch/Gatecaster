@@ -136,41 +136,14 @@ enum VortexShader {
         stars *= (1.0 - reveal) * (1.0 - dive*0.7);
         col += stars;
 
-        // the modal pops OUT of the vortex centre with an easeOutBack overshoot
+        // After the dive, settle into a calm FULL-SCREEN starfield — the welcome-step
+        // backdrop on pure black. The step card is now a solid SwiftUI panel ON TOP, so
+        // the shader no longer draws a modal; the controller fades this whole view out
+        // (to the black window bg) once the user leaves the welcome step.
         if (t > SUCK_END) {
-            float u = clamp((t-SUCK_END)/(DIVE_END-SUCK_END), 0.0, 1.0);
-            float ob = 1.0 + 2.70158*pow(u-1.0,3.0) + 1.70158*pow(u-1.0,2.0);
-            float2 hsz = U.win*0.5 * max(ob, 0.02);
-            float sd = roundRectSD(sp, hsz, 18.0);
-            // crisp edge: ~1px antialias band only (was a 3px band that read as a blurred border).
-            float inside = smoothstep(1.0, -1.0, sd);
-            // top-lit normalized height (top-left origin → -sp.y is "up"); drives both the
-            // glass gradient and the rim sheen so the panel looks lit from above.
-            float gy = clamp(-sp.y / max(hsz.y, 1.0) * 0.5 + 0.5, 0.0, 1.0);
-
-            // Dim outside the panel as it pops. The controller fades the whole Metal
-            // view out afterward (revealDesktop) to uncover the live desktop, so the
-            // shader itself need not drive the outside to black.
-            col *= mix(1.0, 0.05, reveal * (1.0 - inside));
-
-            // frosted dark-glass interior: a subtle top-lit base instead of flat black.
-            float3 glassBase = mix(float3(0.012), float3(0.05), gy);
-            col = mix(col, glassBase, inside * reveal * 0.94);
-
-            // calm stars seen THROUGH the glass: displaced by fbm (refraction) and dimmer.
-            float em = easeS((t-SUCK_END)/1.4);
-            float2 gwarp = (float2(fbm(sp*0.012 + t*0.05),
-                                   fbm(sp*0.012 - 5.0 - t*0.04)) - 0.5) * 16.0;
-            float cf = calmField(sp + gwarp, t);
-            col += float3(cf) * inside * em * reveal * 0.85;
-
-            // specular sheen hugging the top rim — the liquid-glass highlight.
-            float sheen = smoothstep(0.62, 1.0, gy) * inside;
-            col += float3(1.0) * sheen * reveal * 0.045;
-
-            // crisp ~1.5px rim line (replaces the old wide exp glow that read as blur).
-            float rim = 1.0 - smoothstep(0.0, 1.5, abs(sd));
-            col += float3(1.0) * rim * reveal * 0.5;
+            float em = easeS((t-SUCK_END)/1.4);   // calm stars ease in over 1.4s
+            float cf = calmField(sp, t);
+            col += float3(cf) * em;
         }
 
         return float4(col, 1.0);

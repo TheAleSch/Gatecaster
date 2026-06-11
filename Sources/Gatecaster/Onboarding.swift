@@ -49,12 +49,11 @@ final class OnboardingController {
         let win = KeyableWindow(contentRect: frame, styleMask: .borderless,
                                 backing: .buffered, defer: false)
         win.level = .normal       // System Settings / TCC prompts must be able to cover us
-        // Non-opaque from the start: during the intro the Metal view renders opaque
-        // black so the screen looks like dark space; once the vortex finishes we fade
-        // that view out and the clear window lets the desktop show behind the glass panel.
-        win.isOpaque = false
-        win.backgroundColor = .clear
-        win.hasShadow = false
+        // Pure-black backdrop the whole time: the welcome step shows the calm starfield
+        // on black; leaving welcome fades the Metal view out to this same black window
+        // background. (No desktop is ever revealed — the bg stays 100% black.)
+        win.isOpaque = true
+        win.backgroundColor = .black
         win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let container = NSView(frame: NSRect(origin: .zero, size: frame.size))
@@ -71,7 +70,6 @@ final class OnboardingController {
                 self.finishIntro(animated: true)
             }
             mtk.autoresizingMask = [.width, .height]
-            mtk.layer?.isOpaque = false   // so fading the view's alpha reveals the desktop, not black
             container.addSubview(mtk)
         } else {
             model.introDone = true   // static fallback: show content immediately
@@ -99,9 +97,9 @@ final class OnboardingController {
         NSApp.activate(ignoringOtherApps: true)
         win.makeKeyAndOrderFront(nil)
 
-        // Reduce-Motion / resume / no-Metal paths already set introDone — drop straight
-        // to the glass panel with no vortex by removing the (black) Metal view now.
-        if model.introDone { revealDesktop(animated: false) }
+        // Reduce-Motion / resume / no-Metal paths already set introDone. The welcome
+        // step keeps its starfield; any later resume step starts on the plain black bg.
+        if model.introDone && model.stage != .welcome { revealDesktop(animated: false) }
 
         // Any key during the intro skips it; number keys pick a display on the
         // monitor step. Local monitor only — no nextEvent loops (HID deadlock).
@@ -123,17 +121,16 @@ final class OnboardingController {
         finishIntro(animated: true)
     }
 
-    /// Mark the intro complete exactly once, then crossfade the Metal view out so the
-    /// step content lands on the real glass panel over the revealed desktop.
+    /// Mark the intro complete exactly once. Keep the calm starfield on the welcome
+    /// step; it's only cleared (faded to black) once the user moves past welcome (setStage).
     private func finishIntro(animated: Bool) {
         guard !model.introDone else { return }
         model.introDone = true
-        revealDesktop(animated: animated)
+        if model.stage != .welcome { revealDesktop(animated: animated) }
     }
 
-    /// Fade (or instantly drop) the vortex view. Because the window is non-opaque,
-    /// dropping the view's alpha reveals the live desktop behind the glass panel.
-    /// Removing the view also stops its 60fps draw loop.
+    /// Fade (or instantly drop) the vortex/starfield view to the black window bg.
+    /// Used when leaving the welcome step. Removing the view also stops its 60fps loop.
     private func revealDesktop(animated: Bool) {
         guard let mtk = mtkView else { return }
         guard animated else {
@@ -167,6 +164,8 @@ final class OnboardingController {
     }
 
     private func setStage(_ s: OnboardingStage) {
+        // Leaving the welcome step uncovers the desktop: fade the starfield out once.
+        if s != .welcome { revealDesktop(animated: true) }
         model.stage = s
         settings.onboardingStage = s.rawValue   // relaunch resumes here
         settings.save()
@@ -278,11 +277,12 @@ struct OnboardingView: View {
 
     @State private var permTick = false
     private let permPoll = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack {
             if model.introDone {
-                glassPanel
+                solidPanel
                     .transition(.opacity)
             }
         }
@@ -290,15 +290,18 @@ struct OnboardingView: View {
         .animation(.easeIn(duration: 0.5), value: model.introDone)
     }
 
-    /// The step content on a REAL macOS Liquid Glass panel. The intro's Metal view
-    /// is faded out by the controller once introDone, so this glass vibrancy-blurs the
-    /// live desktop behind the (now transparent) window — a regular floating glass panel.
-    private var glassPanel: some View {
+    /// Solid step card that follows the system appearance: near-black in dark mode,
+    /// off-white in light mode. (On the welcome step the calm starfield shows around it
+    /// on black; on later steps the Metal view has faded out to the black backdrop.)
+    private var panelFill: Color { colorScheme == .dark ? Color(white: 0.12) : Color(white: 0.94) }
+
+    private var solidPanel: some View {
         let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
         return content
             .frame(width: modalSize.width, height: modalSize.height)
-            .glassEffect(.regular, in: shape)
-            .overlay(shape.strokeBorder(.white.opacity(0.14), lineWidth: 1))
+            .background(shape.fill(panelFill))
+            .overlay(shape.strokeBorder(.primary.opacity(0.10), lineWidth: 1))
+            .shadow(color: .black.opacity(0.35), radius: 30, y: 10)
     }
 
     @ViewBuilder private var content: some View {
@@ -324,20 +327,23 @@ struct OnboardingView: View {
         HStack(spacing: 8) {
             ForEach(0..<4, id: \.self) { i in
                 Circle()
-                    .fill(i == model.stage.rawValue ? Color.white : Color.white.opacity(0.22))
+                    .fill(i == model.stage.rawValue ? Color.primary : Color.primary.opacity(0.22))
                     .frame(width: 6, height: 6)
             }
         }
     }
 
+    /// High-contrast primary button, flat fill (no gradient), inverting with the
+    /// appearance: white button / black text in dark mode, the reverse in light mode.
     private func cta(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        let fg: Color = colorScheme == .dark ? .black : .white
+        let bg: Color = colorScheme == .dark ? .white : .black
+        return Button(action: action) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.black)
+                .foregroundColor(fg)
                 .frame(width: 200, height: 38)
-                .background(LinearGradient(colors: [.white, Color(white: 0.85)],
-                                           startPoint: .top, endPoint: .bottom))
+                .background(bg)
                 .cornerRadius(9)
         }
         .buttonStyle(.plain)
@@ -362,7 +368,7 @@ struct OnboardingView: View {
             cta("Get Started") { advance() }
             Spacer().frame(height: 18)
         }
-        .foregroundColor(.white)
+        .foregroundColor(.primary)
     }
 
     private func featureRow(_ icon: String, _ title: String, _ detail: String) -> some View {
@@ -384,7 +390,7 @@ struct OnboardingView: View {
             Spacer().frame(height: 8)
             PermissionsView()                      // shared live checklist (Task 2)
                 .padding(18)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.06)))
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06)))
                 .frame(maxWidth: 460)
             Spacer()
             cta("Continue") { advance() }
@@ -392,7 +398,7 @@ struct OnboardingView: View {
                 .opacity(permissionsGranted ? 1 : 0.4)
             Spacer().frame(height: 18)
         }
-        .foregroundColor(.white)
+        .foregroundColor(.primary)
         .onReceive(permPoll) { _ in permTick.toggle() }   // re-evaluate permissionsGranted
     }
 
@@ -417,7 +423,7 @@ struct OnboardingView: View {
                             Text("\(d.number)")
                                 .font(.system(size: 20, weight: .bold))
                                 .frame(width: 36, height: 36)
-                                .background(Circle().fill(Color.white.opacity(0.12)))
+                                .background(Circle().fill(Color.primary.opacity(0.12)))
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(d.name).font(.system(size: 13, weight: .medium))
                                 Text(d.size).font(.system(size: 11)).opacity(0.55)
@@ -426,7 +432,7 @@ struct OnboardingView: View {
                             Image(systemName: "chevron.right").opacity(0.4)
                         }
                         .padding(.horizontal, 14).padding(.vertical, 9)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.06)))
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.06)))
                     }
                     .buttonStyle(.plain)
                 }
@@ -435,7 +441,7 @@ struct OnboardingView: View {
             Spacer()
             Spacer().frame(height: 18)
         }
-        .foregroundColor(.white)
+        .foregroundColor(.primary)
     }
 
     private var calibration: some View {
@@ -455,7 +461,7 @@ struct OnboardingView: View {
                 .padding(.top, 4)
             Spacer().frame(height: 18)
         }
-        .foregroundColor(.white)
+        .foregroundColor(.primary)
     }
 
     private var doneCard: some View {
@@ -471,6 +477,6 @@ struct OnboardingView: View {
             cta("Finish") { finish() }
             Spacer().frame(height: 18)
         }
-        .foregroundColor(.white)
+        .foregroundColor(.primary)
     }
 }
