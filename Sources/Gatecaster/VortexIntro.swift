@@ -216,12 +216,18 @@ final class VortexRenderer: NSObject, MTKViewDelegate {
         cb.present(drawable)
         cb.commit()
         let td = Double(t)
+        // draw() runs on the Metal draw thread; hop onTick to main so callers
+        // (SwiftUI/AppKit state) can mutate UI safely. onTick is only ever
+        // assigned from the main thread, so this read is race-free in practice.
         DispatchQueue.main.async { [weak self] in self?.onTick?(td) }
     }
 }
 
 /// Factory: a continuously-drawing MTKView wired to a VortexRenderer, or nil
 /// when Metal isn't available (caller falls back to a plain fade-in).
+/// The caller MUST keep a strong reference to the returned renderer for as long
+/// as the view is live — MTKView.delegate is weak, so dropping it silently stops
+/// drawing (the renderer is the view's only delegate).
 func makeVortexView(frame: NSRect, windowSize: CGSize) -> (MTKView, VortexRenderer)? {
     guard let device = MTLCreateSystemDefaultDevice(),
           let renderer = VortexRenderer(device: device) else { return nil }
