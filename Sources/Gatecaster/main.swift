@@ -814,6 +814,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     /// Setup Assistant menu item: full flow from the top, intro included.
     @objc private func startSetupAssistant() {
+        guard onboarding == nil else { return }   // already running — ignore re-click, don't clobber the persisted stage
         settings.onboardingStage = 0
         startOnboarding(resumeAt: nil)
     }
