@@ -70,9 +70,11 @@ client-facing reference with examples is in [TOUCH_API.md](TOUCH_API.md); this
 section is the protocol-at-a-glance for someone working on the driver.
 
 **Transport:** Unix-domain stream socket `~/Library/Application Support/Gatecaster/api.sock`
-(local-only by construction; no network). Newline-delimited JSON (NDJSON), one
-object per line, both directions. Multiple simultaneous clients are supported;
-each gets an independent subscription + suppress state.
+(local-only by construction; no network). Created **owner-only** (dir `0700`, socket
+`0600`) so no other local user can connect; the trust boundary is the user's own
+session (see TOUCH_API.md → Security model). Newline-delimited JSON (NDJSON), one
+object per line, both directions. Multiple simultaneous clients are supported; each
+gets an independent subscription + suppress state.
 
 **On connect — server `hello`** (advertises protocol version, capabilities, and
 the geometry a client needs to map normalized → screen coordinates):

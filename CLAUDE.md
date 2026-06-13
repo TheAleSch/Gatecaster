@@ -64,7 +64,18 @@ CGEvents.**
 - [AppSettings.swift](Sources/Gatecaster/AppSettings.swift) — **the single source
   of truth** for all tunables, modes, and calibration. Persisted to
   `~/v17ut-settings.json` (the gesture field recipe lives in `~/v17ut-gesture.json`;
-  both versioned/auto-migrating). Engine reads it live; SwiftUI binds to it.
+  both versioned/auto-migrating). Engine reads it live; SwiftUI binds to it. Also
+  holds the `licenseKey` + cached `proUnlocked` flag (recomputed only on change, never
+  on the per-frame path).
+- [License.swift](Sources/Gatecaster/License.swift) — offline Pro-license
+  verification (Ed25519 via CryptoKit against an embedded public key). The **free**
+  tier is the core driver + the full Touch API (incl. `suppress`); **Pro** ($24)
+  gates the **Deck, on-screen keyboard, and virtual trackpad** — enforced by
+  `requirePro()` at their activation points in `main.swift`, never in the input
+  hot path. Commercial use is an EULA matter, not a code tier. Keys are minted with
+  `scripts/gen-{keypair,license}.swift`; see [docs/LICENSING.md](docs/LICENSING.md)
+  and **[docs/PRE-RELEASE-CHECKLIST.md](docs/PRE-RELEASE-CHECKLIST.md)** (regenerate
+  the committed dev signing key before shipping).
 - [main.swift](Sources/Gatecaster/main.swift) — `NSApplication` accessory app:
   menu-bar item, wires the Engine's callbacks (`onShowKeyboard`,
   `onNotificationCenter`, `onCalibrationTap`, `isOverPanel`, …) to the UI, owns

@@ -47,9 +47,10 @@ trackpad for ordinary Mac apps, you need nothing here — that's the default
 behavior. The Touch API is for apps that consume touch *themselves*.
 
 The transport is a Unix-domain socket, local-only by construction (no network
-listener exists). Any language that can open an `AF_UNIX` stream socket and read
-lines of JSON can be a client; the examples are dependency-free Python, Node.js,
-and Swift.
+listener exists) and **restricted to the user running Gatecaster** (see
+[Security model](#security-model)). Any language that can open an `AF_UNIX` stream
+socket and read lines of JSON can be a client; the examples are dependency-free
+Python, Node.js, and Swift.
 
 ---
 
@@ -71,6 +72,23 @@ Expand `~` to the *invoking user's* home directory. In Python:
 import os
 SOCK = os.path.expanduser("~/Library/Application Support/Gatecaster/api.sock")
 ```
+
+### Security model
+
+The socket and its directory are created **owner-only** (directory `0700`, socket
+`0600`), so **no other local user** on the machine can connect — they can't read
+your touch stream or request suppression.
+
+The trust boundary is therefore *your own user session*: any process **running as
+you** can connect. Through the API such a process can read every contact (including
+what you type on the on-screen keyboard) and request input suppression. This is the
+normal local-IPC boundary — a process running as you already has many ways to
+observe your input — so for a personal Mac it's expected and fine.
+
+For a high-security or commercial kiosk that needs to restrict *which* same-user
+apps may seize input, per-client consent gating of `suppress` is on the roadmap;
+the read channels stay open so ordinary clients keep working. Until then, treat
+`suppress` as available to any process in your session.
 
 ### The hello
 

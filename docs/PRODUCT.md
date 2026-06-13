@@ -36,15 +36,35 @@ wants a couch-or-counter Mac with zero peripherals.
 deeper than both (on-screen keyboard, virtual trackpad, gesture engines,
 edge gestures, calibration UX). Verify current UPDD pricing before launch copy.
 
-## 3. Pricing (proposal)
+## 3. Pricing (decided)
 
-- **$24 one-time** per Mac, personal license (impulse-buy zone; ~4–7× cheaper
-  than UPDD). Optionally $49 "business" tier later.
-- **14-day full trial** — the product sells itself in the first minute of touch
-  working; a trial converts better than a crippled free tier.
-- Payments + license issuance via **Lemon Squeezy or Paddle** (merchant of
-  record → they handle EU VAT etc.; fees ≈ 5% + $0.50 — verify current).
-  Public-key-signed license file, offline grace, check kept OUT of the input path.
+Three tiers, one binary, gated by an offline signed license — see
+[LICENSING.md](LICENSING.md) and [EULA.md](../EULA.md):
+
+- **Free** — the core driver (pointer, gestures, scroll, pinch/rotate, edge
+  gestures) **+ the full Touch API including kiosk input suppression**. This is the
+  acquisition funnel and the hardware-vendor bundle; never gate basic "works on
+  Mac" function.
+- **Pro — $24 one-time** (impulse-buy zone; ~4–7× cheaper than UPDD). Unlocks the
+  **Deck, on-screen keyboard, and virtual trackpad**. Implemented today: Ed25519
+  signed-key verification (`License.swift`), in-app "Unlock Pro…" entry, paywall on
+  the gated features. ✅
+- **Commercial / kiosk / business** — any commercial deployment of *any* edition
+  requires a separate license. **EULA-enforced (legal), not a code gate**; sold
+  hand-to-hand to integrators. Contact path in the EULA.
+
+**Distribution:** hardware vendors bundle the *free* driver because "works great on
+Mac" sells their panels — that's the channel, not a payer. See
+[OEM-ONEPAGER.md](OEM-ONEPAGER.md). Generic-HID support (M2) is what scales this
+from one panel to every USB touch monitor.
+
+- Payments + key issuance via **Lemon Squeezy or Paddle** (merchant of record →
+  they handle EU VAT etc.). A post-purchase webhook runs `scripts/gen-license.swift`
+  to mint and email the signed key. Verification is offline; the check is kept OUT
+  of the input path.
+- **Seat enforcement** (limiting a key to N Macs) needs server-side activation
+  (Keygen.sh / LS / Paddle) and gives up the offline property — deferred; the
+  launch model is an offline honor-system key (name-stamped, unlimited reuse).
 
 ## 4. Milestones
 
@@ -64,8 +84,14 @@ edge gestures, calibration UX). Verify current UPDD pricing before launch copy.
 
 ### M3 — Update + license infrastructure
 - [ ] Sparkle 2 (EdDSA keys, appcast hosted with the site).
-- [ ] License: LS/Paddle webhook → signed license file; in-app entry UI;
-      14-day trial clock; offline grace ≥ 30 days.
+- [x] License: Ed25519 signed-key verification (`License.swift`), in-app entry UI
+      ("Unlock Pro…" + paywall), offline (no server). Key issuance scripts
+      (`gen-keypair.swift`, `gen-license.swift`). See LICENSING.md.
+- [ ] Wire LS/Paddle webhook → `gen-license.swift` for automatic key delivery.
+- [ ] 14-day trial clock (optional — current model is free core + paid Pro unlock,
+      so a trial is a nice-to-have, not required).
+- [ ] **Before launch:** regenerate the signing keypair (the committed one is a dev
+      key) + set the real checkout URL — see PRE-RELEASE-CHECKLIST.md.
 
 ### M4 — First-run experience & polish
 - [ ] Onboarding sequence: welcome → permissions → display pick (numbered
