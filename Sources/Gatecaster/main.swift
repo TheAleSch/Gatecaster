@@ -39,6 +39,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var deckFullScreenRestore: NSRect?
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        warnIfNotShippable()
         // SINGLE INSTANCE: two engines fighting over the same HID device put the
         // cursor on the wrong display and double-post events. The fresh launch
         // wins — older instances are told to quit (covers `open -n` relaunches
@@ -255,6 +256,22 @@ final class AppController: NSObject, NSApplicationDelegate {
     // MARK: licensing (Pro unlock)
     // Where the $24 Pro license is purchased. Replace with the real checkout URL.
     private static let purchaseURL = URL(string: "https://gatecaster.app/buy")!
+
+    /// Loud stderr nag while the dev stubs are still in place — covers the bare
+    /// `swift build` + run path the build scripts can't see. Self-clears the moment
+    /// the dev key / placeholder URL is replaced. See docs/PRE-RELEASE-CHECKLIST.md.
+    private func warnIfNotShippable() {
+        let placeholderURL = Self.purchaseURL.absoluteString == "https://gatecaster.app/buy"
+        guard License.isDevelopmentKey || placeholderURL else { return }
+        var lines = ["⚠️  Gatecaster: NOT shippable yet (docs/PRE-RELEASE-CHECKLIST.md):"]
+        if License.isDevelopmentKey {
+            lines.append("   • License.swift uses the DEV signing key — regenerate: swift scripts/gen-keypair.swift")
+        }
+        if placeholderURL {
+            lines.append("   • purchaseURL is still the placeholder — set your real checkout URL")
+        }
+        FileHandle.standardError.write(Data((lines.joined(separator: "\n") + "\n").utf8))
+    }
 
     /// Gate for a Pro-only feature. Returns true if Pro is unlocked; otherwise shows
     /// the paywall and returns false. Called at each feature's activation point (the

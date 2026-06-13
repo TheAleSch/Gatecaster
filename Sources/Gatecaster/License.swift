@@ -34,6 +34,13 @@ enum License {
     /// private half OFFLINE. Rotating it invalidates every license already issued.
     private static let publicKeyB64 = "fU82foP+k9x5MzK4CJ104ImU1WhNZ7oxrOAdrXZIgm8="
 
+    /// True while `publicKeyB64` is still the committed development key. Drives the
+    /// launch-time "not shippable" nag; flips to false automatically once you paste
+    /// a freshly generated key. (Compares against the known dev value by literal.)
+    static var isDevelopmentKey: Bool {
+        publicKeyB64 == "fU82foP+k9x5MzK4CJ104ImU1WhNZ7oxrOAdrXZIgm8="
+    }
+
     /// Returns the payload iff the key's signature is valid for our public key.
     /// `nil` for an empty, malformed, or forged key (caller treats nil as `free`).
     static func verify(_ licenseKey: String) -> LicensePayload? {
