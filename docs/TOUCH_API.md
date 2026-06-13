@@ -48,8 +48,8 @@ behavior. The Touch API is for apps that consume touch *themselves*.
 
 The transport is a Unix-domain socket, local-only by construction (no network
 listener exists). Any language that can open an `AF_UNIX` stream socket and read
-lines of JSON can be a client; the examples are dependency-free Python and
-Node.js.
+lines of JSON can be a client; the examples are dependency-free Python, Node.js,
+and Swift.
 
 ---
 
@@ -450,7 +450,13 @@ dependency-free reference clients that exercise everything above:
 - **[`client.js`](../examples/touch-api/client.js)** — the same thing in Node.js,
   using only the built-in `net` module.
 
-Run either and touch the panel; see [the examples README](../examples/touch-api/README.md)
+- **[`client.swift`](../examples/touch-api/client.swift)** — the same thing in
+  Swift, using `Network.framework` (`NWConnection`) for the connection and
+  `Codable` models for the wire format. Runs as a script (`swift client.swift`),
+  but its `LineReader`, `TouchClient`, and model structs drop straight into a
+  real macOS app — the canonical example if you're integrating from Swift.
+
+Run any of them and touch the panel; see [the examples README](../examples/touch-api/README.md)
 for exact commands and expected output.
 
 The shape every client follows:

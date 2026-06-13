@@ -12,8 +12,13 @@ Full protocol guide: [`../../docs/TOUCH_API.md`](../../docs/TOUCH_API.md).
   `~/Library/Application Support/Gatecaster/api.sock` on launch. If Gatecaster
   isn't up, the clients wait and retry until it is.
 - A touchscreen Gatecaster supports, connected and resolved to a display.
-- Python 3.6+ (for `client.py`) or Node.js 12+ (for `client.js`). No packages to
-  install — both use only the standard library.
+- One of: Python 3.6+ (`client.py`), Node.js 12+ (`client.js`), or a Swift
+  toolchain (`client.swift`, runs as a script via the `swift` CLI shipped with
+  Xcode / Command Line Tools). No packages to install — every client uses only
+  the platform's standard library.
+
+The three clients are deliberately feature-identical, so pick whichever matches
+the language you're integrating from and read it as the canonical example.
 
 ## Run
 
@@ -30,6 +35,18 @@ Node.js:
 node client.js                 # read-only
 node client.js --suppress      # also suppress system input (kiosk demo)
 ```
+
+Swift (no build step — run the script directly):
+
+```bash
+swift client.swift             # read-only
+swift client.swift --suppress  # also suppress system input (kiosk demo)
+```
+
+The Swift client uses `Network.framework` (`NWConnection`) for the Unix-domain
+connection and `Codable` models for the wire format — lift `LineReader`, the
+`TouchClient` connection handling, and the model structs straight into a real
+macOS app; they have no script-only dependencies.
 
 ## What you should see
 
