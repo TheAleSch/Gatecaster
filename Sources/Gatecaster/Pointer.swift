@@ -8,9 +8,10 @@ enum Pointer {
     // suppression (game / kiosk mode), all CGEvent injection below short-circuits
     // so the client owns the screen. It lives here — next to the code it gates —
     // rather than in AppSettings because it's transient IPC state set by the
-    // socket server: nothing to persist, nothing user-tunable. Single writer (the
-    // API serial queue), single reader (the main run loop); a torn read at worst
-    // costs one frame of staleness, which is harmless for a kill-switch.
+    // socket server: nothing to persist, nothing user-tunable. Written on the main
+    // thread (the server dispatches its onSuppress callback to main) and read on
+    // the main run loop (the Engine's input path), so there's no cross-thread
+    // access at all — both sides are main.
     static var suppressInput = false
 
     // scroll-phase / momentum-phase field ids + values (native trackpad feel).
