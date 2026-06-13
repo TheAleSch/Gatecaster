@@ -203,6 +203,17 @@ final class AppController: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
 
         item(menu, "Settings…", #selector(openSettings))
+        // Pro status / unlock entry point.
+        if settings.proUnlocked {
+            let pro = NSMenuItem(
+                title: settings.licensedTo.isEmpty ? "Gatecaster Pro ✓"
+                                                   : "Gatecaster Pro ✓ — \(settings.licensedTo)",
+                action: nil, keyEquivalent: "")
+            pro.isEnabled = false
+            menu.addItem(pro)
+        } else {
+            item(menu, "Unlock Pro…", #selector(promptForLicense))
+        }
         item(menu, "Show / Hide Touch Keyboard", #selector(toggleKeyboard))
         item(menu, "Show / Hide Virtual Trackpad", #selector(toggleTrackpad))
         item(menu, "Show / Hide Deck", #selector(toggleDeck))
@@ -239,6 +250,72 @@ final class AppController: NSObject, NSApplicationDelegate {
         let it = NSMenuItem(title: title, action: action, keyEquivalent: "")
         it.target = self
         menu.addItem(it)
+    }
+
+    // MARK: licensing (Pro unlock)
+    // Where the $24 Pro license is purchased. Replace with the real checkout URL.
+    private static let purchaseURL = URL(string: "https://gatecaster.app/buy")!
+
+    /// Gate for a Pro-only feature. Returns true if Pro is unlocked; otherwise shows
+    /// the paywall and returns false. Called at each feature's activation point (the
+    /// Deck, on-screen keyboard, virtual trackpad) — never on the Engine's hot path.
+    @discardableResult
+    private func requirePro(_ feature: String) -> Bool {
+        if settings.proUnlocked { return true }
+        presentPaywall(feature: feature)
+        return false
+    }
+
+    private func presentPaywall(feature: String) {
+        let a = NSAlert()
+        a.messageText = "\(feature) is a Gatecaster Pro feature"
+        a.informativeText = """
+            The driver, gestures, and Touch API are free. The Deck, on-screen \
+            keyboard, and virtual trackpad are part of Gatecaster Pro — a one-time \
+            $24 unlock.
+
+            Already bought it? Enter your license key to unlock.
+            """
+        a.addButton(withTitle: "Buy Pro…")
+        a.addButton(withTitle: "Enter License…")
+        a.addButton(withTitle: "Not Now")
+        switch a.runModal() {
+        case .alertFirstButtonReturn:  NSWorkspace.shared.open(Self.purchaseURL)
+        case .alertSecondButtonReturn: promptForLicense()
+        default: break
+        }
+    }
+
+    /// Prompt for a license key, verify it, and persist on success. Invalid keys
+    /// report back so a typo is visible rather than silently ignored.
+    @objc private func promptForLicense() {
+        let a = NSAlert()
+        a.messageText = "Enter your Gatecaster Pro license key"
+        a.informativeText = "Paste the key from your purchase email."
+        a.addButton(withTitle: "Unlock")
+        a.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 340, height: 24))
+        field.placeholderString = "license key"
+        field.stringValue = settings.licenseKey
+        a.accessoryView = field
+        a.window.initialFirstResponder = field
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+
+        let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if License.verify(key)?.tier == .pro {
+            settings.licenseKey = key      // didSet flips proUnlocked; autosave persists it
+            rebuildMenu()
+            let ok = NSAlert()
+            ok.messageText = "Gatecaster Pro unlocked"
+            if !settings.licensedTo.isEmpty { ok.informativeText = "Licensed to \(settings.licensedTo)." }
+            ok.runModal()
+        } else {
+            let bad = NSAlert()
+            bad.alertStyle = .warning
+            bad.messageText = "That license key isn't valid"
+            bad.informativeText = "Check for a copy/paste error, or contact support."
+            bad.runModal()
+        }
     }
 
     // MARK: display binding & hotplug recovery
@@ -418,6 +495,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func showKeyboard() {
         guard keyboardPanel == nil else { return }
+        guard requirePro("The on-screen keyboard") else { return }
         // Non-activating panel: tapping a key never steals focus from the app you're typing into.
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 820, height: 360),
                             styleMask: [.nonactivatingPanel, .borderless],
@@ -556,6 +634,9 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func showTrackpad() {
         guard trackpadPanel == nil else { return }
+        // Gate at activation, not in the hot path. Clear the bound toggle so it
+        // reflects the locked state (and so the $showTrackpad sink doesn't re-fire).
+        guard requirePro("The virtual trackpad") else { settings.showTrackpad = false; return }
         let view = TrackpadView(settings: settings) { [weak self] in
             self?.settings.showTrackpad = false
         }
@@ -586,6 +667,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func showDeck() {
         guard deckPanel == nil else { return }
+        guard requirePro("The Deck") else { settings.showDeck = false; return }
         let view = DeckView(store: DeckStore.shared, settings: settings) { [weak self] in
             self?.settings.showDeck = false
         }

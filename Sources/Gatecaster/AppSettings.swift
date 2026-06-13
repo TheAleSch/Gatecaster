@@ -125,6 +125,22 @@ final class AppSettings: ObservableObject {
     @Published var calYMin = 0.0
     @Published var calYMax = 1856.0
 
+    // MARK: licensing (Pro unlock)
+    // The signed license key the user pasted (empty = free tier). Persisted like any
+    // other setting. `proUnlocked` is the cached verification result — recomputed
+    // only when the key changes, never on the Engine's per-frame read path.
+    @Published var licenseKey = "" { didSet { recomputeLicense() } }
+    /// True iff `licenseKey` is a valid Pro license. Gates the Deck, on-screen
+    /// keyboard, and virtual trackpad; the free core driver + Touch API ignore it.
+    private(set) var proUnlocked = false
+    /// Who the active license was issued to (for display); empty on free tier.
+    private(set) var licensedTo = ""
+    private func recomputeLicense() {
+        let p = License.verify(licenseKey)
+        proUnlocked = p?.tier == .pro
+        licensedTo = p?.name ?? ""
+    }
+
     // Live info (not persisted): the touch controller currently attached.
     @Published var connectedHardware = "Not connected"
 
@@ -182,6 +198,7 @@ final class AppSettings: ObservableObject {
         var deckBackground: String?
         var deckOpacity: Double?
         var deckTheme: String?
+        var licenseKey: String?       // optional: absent in pre-licensing settings files
     }
 
     static let url = FileManager.default.homeDirectoryForCurrentUser
@@ -225,7 +242,8 @@ final class AppSettings: ObservableObject {
                  panelBlur: panelBlur, keyPressFeedback: keyPressFeedback,
                  keyPopup: keyPopup, deckCellSize: deckCellSize,
                  panelFrames: panelFrames, deckBackground: deckBackground,
-                 deckOpacity: deckOpacity, deckTheme: deckTheme)
+                 deckOpacity: deckOpacity, deckTheme: deckTheme,
+                 licenseKey: licenseKey)
     }
 
     private func apply(_ s: Snapshot) {
@@ -276,6 +294,7 @@ final class AppSettings: ObservableObject {
         deckBackground = s.deckBackground ?? "blur"
         deckOpacity = s.deckOpacity ?? 0.9
         deckTheme = s.deckTheme ?? "midnight"
+        licenseKey = s.licenseKey ?? ""   // didSet recomputes proUnlocked
     }
 
     func save() {
@@ -292,8 +311,13 @@ final class AppSettings: ObservableObject {
         apply(s)
     }
 
-    /// Restore every value to its built-in default.
-    func resetToDefaults() { apply(AppSettings.defaults) }
+    /// Restore every value to its built-in default — but NEVER revoke a paid
+    /// license: a settings reset is a behavior reset, not a de-activation.
+    func resetToDefaults() {
+        let key = licenseKey
+        apply(AppSettings.defaults)
+        licenseKey = key
+    }
 
     private static let defaults = Snapshot(
         gestureMode: .smooth, threeFingerEnabled: true,
@@ -314,5 +338,5 @@ final class AppSettings: ObservableObject {
         showDeck: false, panelBlur: true,
         keyPressFeedback: true, keyPopup: true, deckCellSize: 104,
         panelFrames: [:], deckBackground: "blur", deckOpacity: 0.9,
-        deckTheme: "midnight")
+        deckTheme: "midnight", licenseKey: nil)
 }
