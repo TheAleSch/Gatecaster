@@ -86,6 +86,19 @@ final class TouchAPIServer {
         q.async { [weak self] in self?.openSocket() }
     }
 
+    // Mirror HidTouch/Engine's deinit-cleanup pattern. Cleanup is SYNCHRONOUS here,
+    // not via stop()'s `q.async { [weak self] … }`: in deinit self is already at zero
+    // refcount, so a weak-self async block resolves to nil and cleans up nothing.
+    // Doing it inline is safe — there are no references left to schedule racing work
+    // against self, and cancel()/close() are thread-safe. (In practice this server
+    // lives for the whole app, so this runs only at process teardown.)
+    deinit {
+        acceptSource?.cancel()
+        if listenFD >= 0 { Darwin.close(listenFD) }
+        for (_, c) in conns { c.onClosed = nil; c.close() }
+        try? FileManager.default.removeItem(at: Self.socketURL)
+    }
+
     func stop() {
         q.async { [weak self] in
             guard let self = self else { return }
@@ -103,8 +116,16 @@ final class TouchAPIServer {
 
     private func openSocket() {
         let url = Self.socketURL
+        let dir = url.deletingLastPathComponent()
+        // Create the dir owner-only. The socket carries the whole touch stream
+        // (incl. anything the user types on the on-screen keyboard) and lets a
+        // client suppress input, so it must NOT be reachable by other local users.
+        // createDirectory's permissions only apply if it creates the dir, so chmod
+        // unconditionally afterward to tighten an existing, looser one.
         try? FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            at: dir, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        chmod(dir.path, 0o700)
         // A stale socket file from a previous run (or crash) blocks bind() with
         // EADDRINUSE — remove it first. The path is ours; nothing else uses it.
         try? FileManager.default.removeItem(at: url)
@@ -128,6 +149,9 @@ final class TouchAPIServer {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, len) }
         }
         guard bound == 0 else { logErr("bind() failed: \(errno)"); Darwin.close(fd); return }
+        // Defense in depth: even with the 0700 dir, restrict the socket node itself
+        // to owner read/write (macOS checks the socket file's mode on connect()).
+        chmod(path, 0o600)
         guard listen(fd, 8) == 0 else { logErr("listen() failed"); Darwin.close(fd); return }
         setNonBlocking(fd)
         listenFD = fd
@@ -178,9 +202,14 @@ final class TouchAPIServer {
     }
 
     /// `true` → all categories; `false`/`[]` → none; array → exactly those names.
+    /// Any other type is malformed; we still fail safe (no suppression) but log it,
+    /// so a client that sent e.g. `{"suppress":null}` can see why nothing happened
+    /// instead of being silently ignored.
     private static func parseSuppress(_ v: Any) -> Set<String> {
         if let b = v as? Bool { return b ? ["input", "gestures", "edges"] : [] }
         if let arr = v as? [String] { return Set(arr) }
+        FileHandle.standardError.write(Data(
+            "[gatecaster api] ignoring malformed suppress value (\(type(of: v))); expected bool or [string]\n".utf8))
         return []
     }
 

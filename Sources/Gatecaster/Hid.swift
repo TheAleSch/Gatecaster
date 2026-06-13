@@ -25,7 +25,12 @@ final class HidTouch {
 
     deinit {
         // The HID callback writes into reportBuffer for the registration's
-        // lifetime — close the manager BEFORE freeing the buffer.
+        // lifetime — tear the manager down BEFORE freeing the buffer. Unschedule
+        // from the run loop first (symmetric with start()'s schedule): Close()
+        // also unschedules, but doing it explicitly guarantees no queued callback
+        // can fire into a half-deallocated self during teardown.
+        IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(),
+                                          CFRunLoopMode.commonModes.rawValue)
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         reportBuffer.deallocate()
     }

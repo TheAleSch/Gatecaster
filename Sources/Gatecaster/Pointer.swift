@@ -69,7 +69,16 @@ enum Pointer {
     }
 
     static func scroll(dy: Int32, dx: Int32, phase: Int64 = 0, momentum: Int64 = 0) {
-        if suppressInput { return }
+        // CRITICAL: suppression must NEVER swallow a closing phase. If a scroll was
+        // already begun (posted before the client suppressed) and we then drop its
+        // `ended` (phEnded) / momentum-`end` (momEnd), the gesture stays open and
+        // wedges the macOS recognizer system-wide — touchscreen *and* built-in
+        // trackpad — until the process exits (see CLAUDE.md / INTERNALS.md §4.7).
+        // So suppression drops only began/changed and momentum begin/continue;
+        // closing phases always pass. A lone `ended` can't *start* a gesture, so
+        // letting it through when nothing was begun is harmless. Mirrors the
+        // `phase != 4` exception in GestureSynth.post().
+        if suppressInput && phase != Pointer.phEnded && momentum != Pointer.momEnd { return }
         guard let ev = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
                                wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)
         else { return }
