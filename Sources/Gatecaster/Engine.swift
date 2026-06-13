@@ -51,6 +51,19 @@ final class Engine {
     // engine drives scrolling itself.
     var deckScrollAt: ((CGPoint) -> Bool)?
 
+    // Touch API (out-of-process): every report's contacts, mapped to normalized +
+    // screen space, raw (all) and accepted (post-palm-rejection). Engine owns the
+    // coordinate math so the socket server stays a pure formatter. See TouchAPI.swift.
+    var onTouchFrame: ((_ raw: [APIContact], _ accepted: [APIContact]) -> Void)?
+    // Recognized gestures, emitted alongside the synthesized trackpad events.
+    var onGesture: ((APIGesture) -> Void)?
+    // Set by the API server (union of clients' "edges" suppression): when true the
+    // edge-pull triggers (keyboard / Notification Center) are muted so a kiosk app
+    // owns the screen. Like Pointer.suppressInput / GestureSynth.suppressGestures,
+    // it's transient IPC state (not user-tunable, not persisted) so it lives next to
+    // the code it gates; single writer / single reader, both on the main run loop.
+    var apiSuppressEdges = false
+
     // Virtual trackpad: CG rect of the pad's active surface (nil when hidden).
     // Touches that START inside it act like a physical trackpad: relative cursor
     // movement, tap = click, two-finger = scroll (with inertia), 2-finger tap =
@@ -116,6 +129,10 @@ final class Engine {
     private var momOpen = false
     private var magOpen = false             // = "began emitted" for each gesture type
     private var rotOpen = false
+    // API gesture lifecycle, tracked separately from magOpen/rotOpen: those are only
+    // set in Smooth mode, but the API reports the recognized pinch/rotate regardless
+    // of how it's synthesized (Smooth trackpad events or Legacy keystrokes).
+    private var apiPinchOpen = false, apiRotOpen = false
     private enum TwoSub { case none, scroll, pinch, rotate, pan }
     private var twoSub: TwoSub = .none      // latched two-finger gesture
     private var twoStartCx = 0.0, twoStartCy = 0.0   // centroid at touchdown
@@ -177,13 +194,31 @@ final class Engine {
         handle(contacts)
     }
 
-    private func toScreen(_ x: Int, _ y: Int) -> CGPoint {
+    /// Normalize a raw panel point to 0–1 calibrated space (clamped to the panel).
+    private func normalize(_ x: Int, _ y: Int) -> (fx: Double, fy: Double) {
         let spanX = max(1.0, s.calXMax - s.calXMin)
         let spanY = max(1.0, s.calYMax - s.calYMin)
-        let fx = min(1.0, max(0.0, (Double(x) - s.calXMin) / spanX))
-        let fy = min(1.0, max(0.0, (Double(y) - s.calYMin) / spanY))
-        return CGPoint(x: bounds.origin.x + fx * bounds.width,
-                       y: bounds.origin.y + fy * bounds.height)
+        return (min(1.0, max(0.0, (Double(x) - s.calXMin) / spanX)),
+                min(1.0, max(0.0, (Double(y) - s.calYMin) / spanY)))
+    }
+
+    /// Project a normalized 0–1 point onto the active display. One source of truth
+    /// for the panel→screen formula, shared by `toScreen` and `apiContact`.
+    private func project(_ fx: Double, _ fy: Double) -> CGPoint {
+        CGPoint(x: bounds.origin.x + fx * bounds.width,
+                y: bounds.origin.y + fy * bounds.height)
+    }
+
+    private func toScreen(_ x: Int, _ y: Int) -> CGPoint {
+        let (fx, fy) = normalize(x, y)
+        return project(fx, fy)
+    }
+
+    /// Map a raw contact into the API's coordinate bundle (normalized + screen).
+    private func apiContact(_ c: Contact) -> APIContact {
+        let (fx, fy) = normalize(c.x, c.y)
+        let p = project(fx, fy)
+        return APIContact(id: c.id, nx: fx, ny: fy, sx: p.x, sy: p.y)
     }
 
     // MARK: periodic tick (momentum + lift debounce)
@@ -289,6 +324,11 @@ final class Engine {
     private func handle(_ rawContacts: [Contact]) {
         if calibrating { handleCalibration(rawContacts); return }
         let contacts = filterPalms(rawContacts)
+        // Touch API: ship every frame (including the empty lift frame, so clients
+        // see `ended`). Cheap no-op when nobody's hooked it.
+        if let cb = onTouchFrame {
+            cb(rawContacts.map(apiContact), contacts.map(apiContact))
+        }
         let t = now()
         let n = contacts.count
         lastActionTime = t                          // any touch frame counts as activity
@@ -689,13 +729,15 @@ final class Engine {
             // A quick 3-finger up elsewhere is Mission Control; down is App Exposé.
             if dy < 0 && s.edgeGestures && swipeFromBottom
                 && (t - swipeStartT) * 1000 >= s.edgeDwellMS {
-                onShowKeyboard?()
+                if !apiSuppressEdges { onShowKeyboard?() }
             } else {
                 Pointer.keyFlagged(dy < 0 ? Pointer.kUp : Pointer.kDown, .maskControl)
+                onGesture?(APIGesture(kind: "swipe", direction: dy < 0 ? "up" : "down", fingers: 3))
             }
         } else {
             // left / right = switch Spaces (desktops)
             Pointer.keyFlagged(dx < 0 ? Pointer.kLeft : Pointer.kRight, .maskControl)
+            onGesture?(APIGesture(kind: "swipe", direction: dx < 0 ? "left" : "right", fingers: 3))
         }
         swipeFired = true
     }
@@ -706,6 +748,11 @@ final class Engine {
     private func closeSmoothGestures() {
         if magOpen { GestureSynth.shared.magnify(0, phase: 4); magOpen = false }  // 4 = ended
         if rotOpen { GestureSynth.shared.rotate(0, phase: 4); rotOpen = false }
+        // Close the API gesture lifecycle too. Tracked separately from magOpen/
+        // rotOpen because those are only set in Smooth mode, but the API reports the
+        // recognized gesture regardless of how it's synthesized (Smooth or Legacy).
+        if apiPinchOpen { onGesture?(APIGesture(kind: "pinch", value: 0, phase: "ended")); apiPinchOpen = false }
+        if apiRotOpen { onGesture?(APIGesture(kind: "rotate", value: 0, phase: "ended")); apiRotOpen = false }
     }
 
     private func isTwoFingerTap(_ t: Double) -> Bool {
@@ -729,6 +776,8 @@ final class Engine {
     }
 
     private func emitPinch(ratio: Double) {
+        onGesture?(APIGesture(kind: "pinch", value: ratio, phase: apiPinchOpen ? "changed" : "began"))
+        apiPinchOpen = true
         if s.gestureMode == .shortcuts {
             pinchAccum += ratio
             while pinchAccum > Step.legacyZoom {
@@ -744,6 +793,8 @@ final class Engine {
     }
 
     private func emitRotate(deltaDegrees dAng: Double) {
+        onGesture?(APIGesture(kind: "rotate", value: dAng, phase: apiRotOpen ? "changed" : "began"))
+        apiRotOpen = true
         if s.gestureMode == .shortcuts {
             rotAccum += dAng
             while rotAccum > Step.legacyRotateDeg {
@@ -817,7 +868,8 @@ final class Engine {
             let armed = (t - twoStartT) * 1000 >= s.edgeDwellMS
             setZone(bottom: false, armed ? 2 : 1)   // live zone feedback
             if armed, (twoStartCx - cx) > s.edgePull {
-                onNotificationCenter?(); notifFired = true; mode = .consumed
+                if !apiSuppressEdges { onNotificationCenter?() }
+                notifFired = true; mode = .consumed
                 setZone(bottom: false, 0)
                 return
             }
@@ -831,7 +883,8 @@ final class Engine {
             let armed = (t - twoStartT) * 1000 >= s.edgeDwellMS
             setZone(bottom: true, armed ? 2 : 1)
             if armed, (twoStartCy - cy) > s.edgePull {
-                onShowKeyboard?(); kbFired = true; mode = .consumed
+                if !apiSuppressEdges { onShowKeyboard?() }
+                kbFired = true; mode = .consumed
                 setZone(bottom: true, 0)
                 return
             }
@@ -894,12 +947,17 @@ final class Engine {
         let iy = Int32(sacc.y), ix = Int32(sacc.x)
         if iy != 0 || ix != 0 {
             Pointer.scroll(dy: iy, dx: ix, phase: phaseOpen ? Pointer.phChanged : Pointer.phBegan)
+            onGesture?(APIGesture(kind: "scroll", phase: phaseOpen ? "changed" : "began",
+                                  dx: Double(ix), dy: Double(iy)))
             phaseOpen = true
             sacc.y -= Double(iy); sacc.x -= Double(ix)
         }
     }
     private func endScrollPhase() {
-        if phaseOpen { Pointer.scroll(dy: 0, dx: 0, phase: Pointer.phEnded); phaseOpen = false }
+        if phaseOpen {
+            Pointer.scroll(dy: 0, dx: 0, phase: Pointer.phEnded); phaseOpen = false
+            onGesture?(APIGesture(kind: "scroll", phase: "ended", dx: 0, dy: 0))
+        }
     }
 
     // MARK: momentum

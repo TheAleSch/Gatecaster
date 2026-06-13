@@ -9,6 +9,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     let engine = Engine()
     let hid = HidTouch()
     let capture = Capture()
+    let api = TouchAPIServer()
     var statusItem: NSStatusItem!
 
     private var settingsWindow: NSWindow?
@@ -80,8 +81,22 @@ final class AppController: NSObject, NSApplicationDelegate {
         engine.onNotificationCenter = { [weak self] in
             DispatchQueue.main.async { self?.openNotificationCenter() }
         }
+
+        // Touch API: stream this frame's contacts / gestures to any connected
+        // third-party client, and let a client suppress our own input injection.
+        engine.onTouchFrame = { [weak self] raw, accepted in
+            self?.api.publishFingers(raw: raw, accepted: accepted)
+        }
+        engine.onGesture = { [weak self] g in self?.api.publishGesture(g) }
+        api.onSuppress = { [weak self] input, gestures, edges in
+            Pointer.suppressInput = input
+            GestureSynth.suppressGestures = gestures
+            self?.engine.apiSuppressEdges = edges
+        }
+
         engine.start()
         hid.start()
+        api.start()
 
         // First-run (or resumed) onboarding replaces the bare display picker.
         // Existing users with everything granted never see it (hasOnboarded is
@@ -239,6 +254,11 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         clampAllPanels()    // touch UI follows the touch display
         refreshEdgeHints()  // reposition strips too
+        // Keep the Touch API's advertised geometry in sync with the active display
+        // + calibration, so a client's hello carries the right screen/panel bounds.
+        api.updateGeometry(screen: engine.bounds,
+                           cal: (settings.calXMin, settings.calXMax,
+                                 settings.calYMin, settings.calYMax))
     }
 
     // MARK: edge-zone hint strips (DEBUG visual only; mouse events pass through)
@@ -879,6 +899,10 @@ final class AppController: NSObject, NSApplicationDelegate {
         calibrationWindow = nil
         calController = nil
         onboarding?.calibrationFinished()   // onboarding shows its close-out card
+        // Refresh the Touch API hello geometry with the new calibration.
+        api.updateGeometry(screen: engine.bounds,
+                           cal: (settings.calXMin, settings.calXMax,
+                                 settings.calYMin, settings.calYMax))
     }
 
     // MARK: actions

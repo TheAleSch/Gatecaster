@@ -4,6 +4,15 @@ import Foundation
 /// Thin wrappers over Quartz event posting: cursor, clicks, phase-tagged
 /// momentum scroll, and keyboard combos.
 enum Pointer {
+    // API suppression kill-switch. When a Touch-API client claims "input"
+    // suppression (game / kiosk mode), all CGEvent injection below short-circuits
+    // so the client owns the screen. It lives here — next to the code it gates —
+    // rather than in AppSettings because it's transient IPC state set by the
+    // socket server: nothing to persist, nothing user-tunable. Single writer (the
+    // API serial queue), single reader (the main run loop); a torn read at worst
+    // costs one frame of staleness, which is harmless for a kill-switch.
+    static var suppressInput = false
+
     // scroll-phase / momentum-phase field ids + values (native trackpad feel).
     // Resolved once — no per-event force-unwraps in the hot path.
     private static let scrollPhaseField = CGEventField(rawValue: 99)!
@@ -13,6 +22,7 @@ enum Pointer {
 
     private static func postMouse(_ type: CGEventType, _ p: CGPoint,
                                   _ button: CGMouseButton = .left) {
+        if suppressInput { return }
         CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p,
                 mouseButton: button)?.post(tap: .cghidEventTap)
     }
@@ -26,6 +36,7 @@ enum Pointer {
     /// pointer back to where it was before a touch). Re-associate so the next
     /// real movement isn't briefly decoupled after the warp.
     static func warp(_ p: CGPoint) {
+        if suppressInput { return }
         CGWarpMouseCursorPosition(p)
         CGAssociateMouseAndMouseCursorPosition(1)
     }
@@ -42,6 +53,7 @@ enum Pointer {
     /// `mouseEventClickState`, two separate tap pairs never register as a
     /// double-click in most apps.
     static func click(_ p: CGPoint, clickState: Int64 = 1) {
+        if suppressInput { return }
         for type in [CGEventType.leftMouseDown, .leftMouseUp] {
             let ev = CGEvent(mouseEventSource: nil, mouseType: type,
                              mouseCursorPosition: p, mouseButton: .left)
@@ -56,6 +68,7 @@ enum Pointer {
     }
 
     static func scroll(dy: Int32, dx: Int32, phase: Int64 = 0, momentum: Int64 = 0) {
+        if suppressInput { return }
         guard let ev = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
                                wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)
         else { return }
@@ -65,6 +78,7 @@ enum Pointer {
     }
 
     static func keyFlagged(_ keycode: CGKeyCode, _ flags: CGEventFlags) {
+        if suppressInput { return }
         for down in [true, false] {
             let ev = CGEvent(keyboardEventSource: nil, virtualKey: keycode, keyDown: down)
             ev?.flags = flags
