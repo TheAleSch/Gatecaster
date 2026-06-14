@@ -1,0 +1,36 @@
+{
+  "name": "gatecaster",
+  "version": "0.1.0",
+  "description": "Author, validate, and install Gatecaster Deck extensions (schema v2).",
+  "type": "module",
+  "bin": {
+    "gatecaster": "bin/gatecaster.js"
+  },
+  "exports": {
+    "./schema": "./lib/schema.js",
+    "./provider": "./templates/provider/gatecaster-provider.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "templates/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "gatecaster",
+    "deck",
+    "macos",
+    "touchscreen",
+    "extension",
+    "plugin"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TheAleSch/gatecaster"
+  },
+  "dependencies": {}
+}

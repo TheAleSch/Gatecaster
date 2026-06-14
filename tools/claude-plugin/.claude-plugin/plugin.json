@@ -1,0 +1,9 @@
+{
+  "name": "gatecaster-extensions",
+  "version": "0.1.0",
+  "description": "Author Gatecaster Deck extensions: scaffold, validate, and install manifest.json tiles (declarative fields/buttons, poll refresh, or push NDJSON providers) with the gatecaster CLI.",
+  "author": { "name": "TheAleSch" },
+  "homepage": "https://github.com/TheAleSch/gatecaster",
+  "keywords": ["gatecaster", "deck", "macos", "extension", "skill"],
+  "skills": ["./skills/gatecaster-extension"]
+}

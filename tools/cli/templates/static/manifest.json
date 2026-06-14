@@ -1,0 +1,20 @@
+{
+  "v": 2,
+  "id": "__ID__",
+  "name": "__NAME__",
+  "symbol": "square.grid.2x2",
+  "colorHex": "#5E5CE6",
+  "minW": 2, "minH": 1, "defaultW": 2, "defaultH": 2,
+
+  "view": { "kind": "declarative" },
+
+  "buttons": [
+    { "symbol": "bolt.fill", "label": "Run", "run": "hello" }
+  ],
+
+  "actions": {
+    "hello": { "interpreter": "osascript", "script": "display notification \"Hello from __NAME__\"" }
+  },
+
+  "capabilities": ["shell"]
+}

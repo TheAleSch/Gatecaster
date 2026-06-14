@@ -176,23 +176,37 @@ struct WidgetManifest: Codable, Identifiable {
         var label: String
         var refreshKey: String?          // key into refresh JSON; else static `value`
         var value: String?
-        // v2 (§5.2) — all additive. `type` ∈ text|image|range (default text;
-        // unknown ⇒ text, forward-compat). `image` renders the state value as a
-        // tile image (data URI / file path / provider-pushed PNG, §9). `range`
-        // draws a 0..max bar. `size` ∈ small|regular|large.
+        // v2 (§5.2) — all additive. `type` ∈ text|image|range|slider|dial (default
+        // text; unknown ⇒ text, forward-compat). `image` renders the state value as
+        // a tile image (data URI / file path / provider-pushed PNG, §9). `range`
+        // draws a read-only 0..max bar. `slider`/`dial` are INTERACTIVE: the user
+        // drags to set a value in [min,max] (default 0..100) and the dragged int is
+        // substituted as `$value` into the field's `action`/`run`, fired throttled
+        // (§5.9). A slider/dial with no action just displays. `size` ∈
+        // small|regular|large. `orientation` ∈ vertical(default)|horizontal (slider).
         var type: String?
         var size: String?
         var min: Double?
         var max: Double?
+        var orientation: String?         // slider axis; dial ignores it
+        // Interactive set-value action (slider/dial). EITHER inline `action` OR a
+        // named `run` (resolved against the manifest's `actions` map) — `run` wins.
+        // The dragged value is injected as the `$value` token before $config.
+        var action: ManifestAction?
+        var run: String?
 
         // Tolerant decode — a field with no `label` falls back to "" rather than
         // failing the parent manifest's whole decode (forward/backward-compat).
         init(label: String = "", refreshKey: String? = nil, value: String? = nil,
-             type: String? = nil, size: String? = nil, min: Double? = nil, max: Double? = nil) {
+             type: String? = nil, size: String? = nil, min: Double? = nil, max: Double? = nil,
+             orientation: String? = nil, action: ManifestAction? = nil, run: String? = nil) {
             self.label = label; self.refreshKey = refreshKey; self.value = value
             self.type = type; self.size = size; self.min = min; self.max = max
+            self.orientation = orientation; self.action = action; self.run = run
         }
-        enum CodingKeys: String, CodingKey { case label, refreshKey, value, type, size, min, max }
+        enum CodingKeys: String, CodingKey {
+            case label, refreshKey, value, type, size, min, max, orientation, action, run
+        }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
@@ -202,6 +216,9 @@ struct WidgetManifest: Codable, Identifiable {
             size = try c.decodeIfPresent(String.self, forKey: .size)
             min = try c.decodeIfPresent(Double.self, forKey: .min)
             max = try c.decodeIfPresent(Double.self, forKey: .max)
+            orientation = try c.decodeIfPresent(String.self, forKey: .orientation)
+            action = try c.decodeIfPresent(ManifestAction.self, forKey: .action)
+            run = try c.decodeIfPresent(String.self, forKey: .run)
         }
     }
     struct ManifestButton: Codable, Hashable {
@@ -696,19 +713,20 @@ func widgetDefaultSpan(_ kind: String) -> (w: Int, h: Int) {
     }
 }
 
-// MARK: - drag regions (volume bars opt OUT of the deck's scroll routing)
+// MARK: - drag regions (draggable controls opt OUT of the deck's scroll routing)
 
 /// Panel-local frames (top-left points, from SwiftUI `.global`) of on-screen
-/// volume bars. The deck routes one-finger drags below its header to a native
-/// ScrollView by default (the engine drives the scroll, since SwiftUI gestures
-/// don't receive our synthetic drags on a non-key panel). The volume bar is the
-/// one widget that needs a real mouse DRAG instead, so it publishes its frame
-/// here and `AppDelegate.deckScrollRegion` excludes these rects — making the
-/// engine send a leftDown/leftDrag the bar's gesture can track. Keyed by widget
-/// id; entries are removed on disappear. Main-thread only (engine callbacks and
+/// draggable controls — the built-in volume bar AND any third-party extension
+/// `slider`/`dial` field. The deck routes one-finger drags below its header to a
+/// native ScrollView by default (the engine drives the scroll, since SwiftUI
+/// gestures don't receive our synthetic drags on a non-key panel). A draggable
+/// control needs a real mouse DRAG instead, so it publishes its frame here and
+/// `AppDelegate.deckScrollRegion` excludes these rects — making the engine send a
+/// leftDown/leftDrag the control's gesture can track. Keyed by a per-control id;
+/// entries are removed on disappear. Main-thread only (engine callbacks and
 /// SwiftUI both touch it on main).
 enum DeckDragRegions {
-    static var volumeRects: [UUID: CGRect] = [:]
+    static var dragRects: [UUID: CGRect] = [:]
 }
 
 // MARK: - widget tile views
@@ -988,9 +1006,9 @@ private struct VolumeWidget: View {
                 // without this, a touch-drag here scrolls (the bar never updates).
                 .background(GeometryReader { g in
                     Color.clear
-                        .onAppear { DeckDragRegions.volumeRects[id] = g.frame(in: .global) }
+                        .onAppear { DeckDragRegions.dragRects[id] = g.frame(in: .global) }
                         .onChange(of: g.frame(in: .global)) { f in
-                            DeckDragRegions.volumeRects[id] = f
+                            DeckDragRegions.dragRects[id] = f
                         }
                 })
                 // highPriorityGesture: non-activating panel gesture disambiguation
@@ -1009,7 +1027,7 @@ private struct VolumeWidget: View {
                 .foregroundColor(.secondary)
         }
         .padding(8)
-        .onDisappear { DeckDragRegions.volumeRects[id] = nil }
+        .onDisappear { DeckDragRegions.dragRects[id] = nil }
     }
 }
 
@@ -1058,11 +1076,21 @@ private struct ExtensionWidget: View {
                 Spacer()
             }
             ForEach(manifest.fields ?? [], id: \.label) { f in
-                HStack {
-                    Text(f.label).font(.system(size: 11)).foregroundColor(.secondary)
-                    Spacer()
-                    Text(value(for: f)).font(.system(size: 11, weight: .medium))
-                        .lineLimit(1)
+                if f.type == "slider" || f.type == "dial" {
+                    // Interactive set-value control (§5.9). Publishes its frame to
+                    // DeckDragRegions so the engine routes a real mouse drag here
+                    // (not deck scroll), and fires the field's action with $value.
+                    InteractiveFieldView(
+                        field: f,
+                        liveValue: numericValue(for: f),
+                        onSet: { fireField(f, $0) })
+                } else {
+                    HStack {
+                        Text(f.label).font(.system(size: 11)).foregroundColor(.secondary)
+                        Spacer()
+                        Text(value(for: f)).font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                    }
                 }
             }
             if let buttons = manifest.buttons, !buttons.isEmpty {
@@ -1143,6 +1171,16 @@ private struct ExtensionWidget: View {
         return f.value ?? "—"
     }
 
+    /// The field's current value as a number for slider/dial seeding — from live
+    /// refresh data (refreshKey) or the static `value`, tolerating a trailing unit
+    /// like "40%". nil ⇒ the control starts at `min` and is purely user-driven.
+    private func numericValue(for f: WidgetManifest.ManifestField) -> Double? {
+        let raw = (f.refreshKey.flatMap { data.values[$0] }) ?? f.value
+        guard let raw else { return nil }
+        let num = raw.prefix { $0.isNumber || $0 == "." || $0 == "-" }
+        return Double(num)
+    }
+
     // MARK: - action firing (inline + named, §5.3/§5.7)
 
     /// Fire an inline `action`, substituting `$config.<key>` in its value first.
@@ -1150,45 +1188,66 @@ private struct ExtensionWidget: View {
         DeckRunner.run(DeckAction(kind: a.kind, value: substitute(a.value)))
     }
 
-    /// Fire a named action referenced by a button's `run` (§5.3). Resolves the
-    /// `actions` map, enforces the capability ceiling (§8/§9.3 L4), handles the
-    /// `provider`/`interpreter` forms the declarative `DeckAction` can't express,
-    /// and runs `then:"refresh"` to close the tap→state loop.
+    /// Fire a named action referenced by a button's `run` (§5.3).
     private func fireNamed(_ ref: String) {
         guard let act = manifest.actions?[ref] else { return }
+        runManifest(act, label: ref)
+    }
+
+    /// Fire a slider/dial field's set-value action (§5.9): `run` (named) wins over
+    /// inline `action`; the dragged int is injected as `$value`. No-op if neither.
+    private func fireField(_ f: WidgetManifest.ManifestField, _ value: Double) {
+        let token = String(Int(value.rounded()))
+        if let ref = f.run, let act = manifest.actions?[ref] {
+            runManifest(act, label: ref, value: token)
+        } else if let act = f.action {
+            runManifest(act, label: f.label, value: token)
+        }
+    }
+
+    /// Core action runner shared by named-button `run` and slider/dial fields.
+    /// Resolves the action shape, enforces the capability ceiling (§8/§9.3 L4),
+    /// handles the `provider`/`interpreter` forms the declarative `DeckAction`
+    /// can't express, substitutes `$value` (when set) then `$config`, and runs
+    /// `then:"refresh"` to close the input→state loop.
+    private func runManifest(_ act: WidgetManifest.ManifestAction, label: String, value: String? = nil) {
         let caps = PluginCapabilities(manifest)
+        let sub: (String) -> String = { substitute($0, value: value) }
 
         if let kind = act.kind {
             // Capability gate: a privileged kind runs only if declared (§9.3 L4).
             guard caps.allows(kind: kind) else {
-                data.providerError = "Action “\(ref)” needs the `\(kind)` capability"
+                data.providerError = "Action “\(label)” needs the `\(kind)` capability"
                 return
             }
             if kind == "provider" {
                 // Forward to this tile's running provider over its stdin (§10.3).
-                data.sendToProvider(action: substitute(act.value ?? ""),
+                data.sendToProvider(action: sub(act.value ?? ""),
                                     params: resolveParams(act.params))
             } else if let mapped = DeckActionKind(rawValue: kind) {
-                DeckRunner.run(DeckAction(kind: mapped, value: substitute(act.value ?? "")))
+                DeckRunner.run(DeckAction(kind: mapped, value: sub(act.value ?? "")))
             }
         } else if let interp = act.interpreter, let script = act.script {
             // Multi-line osascript/zsh (§5.7) — gated by `shell`.
             guard caps.canRunShell else {
-                data.providerError = "Action “\(ref)” needs the `shell` capability"
+                data.providerError = "Action “\(label)” needs the `shell` capability"
                 return
             }
             let exe = interp == "osascript" ? "/usr/bin/osascript" : "/bin/zsh"
-            let args = interp == "osascript" ? ["-e", substitute(script)]
-                                             : ["-lc", substitute(script)]
+            let args = interp == "osascript" ? ["-e", sub(script)]
+                                             : ["-lc", sub(script)]
             DeckRunner.runProcess(exe, args)
         }
 
         if act.wantsRefresh { data.repoll() }   // then:"refresh"
     }
 
-    /// Replace `$config.<key>` tokens with the per-instance config value (§5.8/§6).
-    private func substitute(_ s: String) -> String {
+    /// Replace `$value` (when set) then `$config.<key>` tokens. `$value` is the
+    /// live slider/dial position; substituted first so a config value can't shadow
+    /// it. (§5.8/§5.9/§6).
+    private func substitute(_ s: String, value: String? = nil) -> String {
         var out = s
+        if let v = value { out = out.replacingOccurrences(of: "$value", with: v) }
         for (k, v) in config where k.hasPrefix("$") == false {
             out = out.replacingOccurrences(of: "$config.\(k)", with: v)
         }
@@ -1200,6 +1259,121 @@ private struct ExtensionWidget: View {
         var out: [String: String] = [:]
         for n in names ?? [] { out[n] = config[n] ?? "" }
         return out
+    }
+}
+
+/// Publishes a view's screen frame into `DeckDragRegions` so the engine routes a
+/// one-finger touch over it as a real mouse DRAG (not deck scroll), and clears the
+/// entry on disappear. The single-param `onChange` matches the rest of the file
+/// (deprecation warning is intentional parity, not an oversight).
+private struct DragRegion: ViewModifier {
+    let id: UUID
+    func body(content: Content) -> some View {
+        content.background(GeometryReader { g in
+            Color.clear
+                .onAppear { DeckDragRegions.dragRects[id] = g.frame(in: .global) }
+                .onChange(of: g.frame(in: .global)) { DeckDragRegions.dragRects[id] = $0 }
+        })
+    }
+}
+
+/// Interactive `slider`/`dial` field (§5.9). Once touched it OWNS its value
+/// locally (live refresh data only seeds the initial position — same model as the
+/// built-in VolumeWidget, which avoids a refresh-vs-drag feedback fight), publishes
+/// its frame so a touch becomes a real mouse drag, throttles firing to ~10 Hz, and
+/// always fires once more on release so the final position lands.
+private struct InteractiveFieldView: View {
+    let field: WidgetManifest.ManifestField
+    let liveValue: Double?
+    let onSet: (Double) -> Void
+
+    @State private var dragValue: Double? = nil   // owns the value once the user drags
+    @State private var lastSent = Date.distantPast
+    @State private var rectID = UUID()
+
+    private var lo: Double { field.min ?? 0 }
+    // Guard hi > lo so the (hi-lo) divisor can't be 0/negative (→ NaN → Int crash).
+    private var hi: Double { Swift.max((field.min ?? 0) + 1, field.max ?? 100) }
+    private var current: Double { Swift.min(hi, Swift.max(lo, dragValue ?? liveValue ?? lo)) }
+    private var frac: CGFloat { CGFloat((current - lo) / (hi - lo)) }
+    private var isHorizontal: Bool { field.orientation == "horizontal" }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            if !field.label.isEmpty {
+                Text(field.label).font(.system(size: 10)).foregroundColor(.secondary)
+            }
+            if field.type == "dial" { dial } else { slider }
+            Text("\(Int(current))").font(.system(size: 10).monospacedDigit())
+                .foregroundColor(.secondary)
+        }
+        .onDisappear { DeckDragRegions.dragRects[rectID] = nil }
+    }
+
+    // Commit a 0..1 fraction → value, throttled while dragging (always on release).
+    private func commit(frac f: CGFloat, throttled: Bool) {
+        let v = lo + Double(Swift.min(1, Swift.max(0, f))) * (hi - lo)
+        dragValue = v
+        if !throttled || Date().timeIntervalSince(lastSent) > 0.1 {
+            lastSent = Date(); onSet(v)
+        }
+    }
+
+    private var slider: some View {
+        GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height
+            ZStack(alignment: isHorizontal ? .leading : .bottom) {
+                RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.18))
+                RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.85))
+                    .frame(width: isHorizontal ? Swift.max(6, w * frac) : nil,
+                           height: isHorizontal ? nil : Swift.max(6, h * frac))
+            }
+            .contentShape(Rectangle())
+            .modifier(DragRegion(id: rectID))
+            // highPriorityGesture: panel gesture disambiguation drops plain
+            // .gesture() — this makes the control always win the drag.
+            .highPriorityGesture(DragGesture(minimumDistance: 0)
+                .onChanged { g in
+                    guard w > 0, h > 0 else { return }       // avoid NaN
+                    let f = isHorizontal ? (g.location.x / w) : (1 - g.location.y / h)
+                    commit(frac: f, throttled: true)
+                }
+                .onEnded { _ in onSet(current) })
+        }
+        .frame(height: isHorizontal ? 18 : 60)
+    }
+
+    private var dial: some View {
+        GeometryReader { geo in
+            // 270° gauge: lo at bottom-left, sweeping clockwise to hi at bottom-
+            // right (gap at the bottom). The trim covers ¾ of the circle; rotating
+            // +135° puts its start at 7:30. The drag math (atan2 from top, ±135°)
+            // is the inverse of this rotation so handle and touch agree.
+            ZStack {
+                Circle().trim(from: 0, to: 0.75)
+                    .stroke(Color.secondary.opacity(0.18),
+                            style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .rotationEffect(.degrees(135))
+                Circle().trim(from: 0, to: 0.75 * frac)
+                    .stroke(Color.accentColor.opacity(0.85),
+                            style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .rotationEffect(.degrees(135))
+                Text("\(Int(current))")
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+            }
+            .padding(4)
+            .contentShape(Rectangle())
+            .modifier(DragRegion(id: rectID))
+            .highPriorityGesture(DragGesture(minimumDistance: 0)
+                .onChanged { g in
+                    let cx = geo.size.width / 2, cy = geo.size.height / 2
+                    // atan2(dx, -dy): 0 at top (12 o'clock), positive clockwise.
+                    let a = atan2(g.location.x - cx, cy - g.location.y) * 180 / .pi
+                    commit(frac: CGFloat((a + 135) / 270), throttled: true)
+                }
+                .onEnded { _ in onSet(current) })
+        }
+        .frame(height: 70)
     }
 }
 

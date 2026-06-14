@@ -1,6 +1,6 @@
 {
-  "id": "com.example.nowplaying",
-  "name": "Now Playing",
+  "id": "com.gatecaster.nowplaying",
+  "name": "Apple Music",
   "symbol": "music.note",
   "colorHex": "#32D74B",
   "fields": [

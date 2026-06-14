@@ -1,0 +1,33 @@
+{
+  "v": 2,
+  "id": "com.gatecaster.audio",
+  "name": "Audio",
+  "symbol": "speaker.wave.3.fill",
+  "colorHex": "#FF9F0A",
+  "minW": 2, "minH": 2, "defaultW": 2, "defaultH": 3,
+  "fields": [
+    { "label": "Output", "type": "slider", "orientation": "vertical",
+      "refreshKey": "out", "min": 0, "max": 100,
+      "action": { "kind": "volume", "value": "$value" } },
+    { "label": "Mic", "type": "dial",
+      "refreshKey": "mic", "min": 0, "max": 100, "run": "setMic" }
+  ],
+  "buttons": [
+    { "states": [
+        { "symbol": "speaker.wave.2.fill", "label": "Mute",
+          "action": { "kind": "shell", "value": "osascript -e 'set volume with output muted'" } },
+        { "symbol": "speaker.slash.fill", "label": "Unmute",
+          "action": { "kind": "shell", "value": "osascript -e 'set volume without output muted'" } }
+    ] }
+  ],
+  "actions": {
+    "setMic": { "kind": "shell",
+      "value": "osascript -e 'set volume input volume $value'", "then": "refresh" }
+  },
+  "refresh": {
+    "command": "osascript -e 'set v to (get volume settings)' -e 'return ((output volume of v) as text) & \"|\" & ((input volume of v) as text)'",
+    "everySeconds": 3,
+    "parse": { "kind": "delimited", "delimiter": "|", "fields": ["out", "mic"] }
+  },
+  "capabilities": ["shell"]
+}

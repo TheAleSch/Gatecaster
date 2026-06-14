@@ -1,0 +1,39 @@
+{
+  "v": 2,
+  "id": "com.gatecaster.spotify",
+  "name": "Spotify",
+  "symbol": "music.note",
+  "colorHex": "#1DB954",
+  "minW": 2, "minH": 2, "defaultW": 3, "defaultH": 3,
+  "fields": [
+    { "label": "Track",  "refreshKey": "name",     "size": "large" },
+    { "label": "Artist", "refreshKey": "artist" },
+    { "label": "Album",  "refreshKey": "album" },
+    { "label": "Time",   "refreshKey": "position" },
+    { "label": "Volume", "refreshKey": "volume", "type": "range", "min": 0, "max": 100 }
+  ],
+  "buttons": [
+    { "symbol": "backward.fill",   "label": "Prev",    "run": "previous" },
+    { "symbol": "playpause.fill",  "label": "Play",    "run": "playpause" },
+    { "symbol": "forward.fill",    "label": "Next",    "run": "next" },
+    { "symbol": "shuffle",         "label": "Shuffle", "run": "shuffle" },
+    { "symbol": "repeat",          "label": "Repeat",  "run": "repeat" },
+    { "symbol": "speaker.minus.fill", "label": "Vol -", "run": "volDown" },
+    { "symbol": "speaker.plus.fill",  "label": "Vol +", "run": "volUp" }
+  ],
+  "actions": {
+    "previous":  { "kind": "shell", "value": "osascript -l JavaScript \"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.spotify/scripts/spotify.js\" previous",            "then": "refresh" },
+    "playpause": { "kind": "shell", "value": "osascript -l JavaScript \"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.spotify/scripts/spotify.js\" playpause",           "then": "refresh" },
+    "next":      { "kind": "shell", "value": "osascript -l JavaScript \"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.spotify/scripts/spotify.js\" next",                "then": "refresh" },
+    "shuffle":   { "kind": "shell", "value": "osascript -l JavaScript \"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.spotify/scripts/spotify.js\" setshuffling toggle", "then": "refresh" },
+    "repeat":    { "kind": "shell", "value": "osascript -l JavaScript \"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.spotify/scripts/spotify.js\" setrepeating toggle", "then": "refresh" },
+    "volUp":     { "kind": "shell", "value": "osascript -l JavaScript \"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.spotify/scripts/spotify.js\" changevolume 5",      "then": "refresh" },
+    "volDown":   { "kind": "shell", "value": "osascript -l JavaScript \"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.spotify/scripts/spotify.js\" changevolume -5",     "then": "refresh" }
+  },
+  "refresh": {
+    "command": "osascript -l JavaScript \"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.spotify/scripts/spotify.js\" getstate",
+    "everySeconds": 3,
+    "parse": { "kind": "json" }
+  },
+  "capabilities": ["shell"]
+}

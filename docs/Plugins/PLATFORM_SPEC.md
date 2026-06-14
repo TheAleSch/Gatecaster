@@ -130,7 +130,7 @@ breaking change (field removal or changed semantics).* A v1 manifest (no `v`, or
 ```jsonc
 {
   "v": 2,                               // schema version (required for v2)
-  "id": "com.example.nowplaying",       // reverse-DNS, unique  (v1, unchanged)
+  "id": "com.gatecaster.nowplaying",       // reverse-DNS, unique  (v1, unchanged)
   "name": "Now Playing",
   "symbol": "music.note",               // SF Symbol header icon
   "colorHex": "#1DB954",                // brand accent (header tint)

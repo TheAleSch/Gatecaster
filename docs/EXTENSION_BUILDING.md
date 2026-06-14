@@ -242,7 +242,7 @@ action.kind ∈ app | url | keystroke | shortcut | shell | volume
 ```
 
 A ready-to-run example lives in
-[`examples/extensions/com.example.nowplaying/`](../examples/extensions/com.example.nowplaying/manifest.json).
+[`examples/extensions/com.gatecaster.nowplaying/`](../examples/extensions/com.gatecaster.nowplaying/manifest.json).
 Copy it, rename the `id`, and start tweaking.
 
 Happy building. 🛠️

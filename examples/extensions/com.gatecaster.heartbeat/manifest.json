@@ -1,6 +1,6 @@
 {
   "v": 2,
-  "id": "com.example.heartbeat",
+  "id": "com.gatecaster.heartbeat",
   "name": "Heartbeat",
   "symbol": "waveform.path.ecg",
   "colorHex": "#FF2D55",

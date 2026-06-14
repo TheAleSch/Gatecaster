@@ -20,7 +20,7 @@ appear in the same menu to drop onto the rail.
 
 ```json
 {
-  "id": "com.example.nowplaying",      // reverse-DNS, unique
+  "id": "com.gatecaster.nowplaying",      // reverse-DNS, unique
   "name": "Now Playing",
   "symbol": "music.note",              // SF Symbol for the header
   "colorHex": "#32D74B",
@@ -80,7 +80,7 @@ osascript -e 'tell application "Music" to set t to name of current track & "|" &
 ```
 
 A complete working example ships in
-[`examples/extensions/com.example.nowplaying/`](../examples/extensions/com.example.nowplaying/manifest.json).
+[`examples/extensions/com.gatecaster.nowplaying/`](../examples/extensions/com.gatecaster.nowplaying/manifest.json).
 Copy that folder into the Extensions location to try it.
 
 ## Security model
@@ -157,7 +157,7 @@ future WebView widget too.
 ## Examples
 
 Two runnable packs ship in `examples/extensions/`:
-- `com.example.nowplaying` — live fields via a refresh command + media buttons.
+- `com.gatecaster.nowplaying` — live fields via a refresh command + media buttons.
 - `com.figma.shortcuts` — ~18 Figma shortcut buttons (no refresh).
 
 Install one by copying its folder into the Extensions location:

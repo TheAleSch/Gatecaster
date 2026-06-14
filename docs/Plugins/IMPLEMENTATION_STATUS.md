@@ -36,8 +36,8 @@ loads unchanged** (the decoders were already tolerant; v2 only adds optional key
 ## How to test (morning)
 
 A zero-dependency provider example is installed at
-`~/Library/Application Support/Gatecaster/Extensions/com.example.heartbeat/`
-(source: `examples/extensions/com.example.heartbeat/`).
+`~/Library/Application Support/Gatecaster/Extensions/com.gatecaster.heartbeat/`
+(source: `examples/extensions/com.gatecaster.heartbeat/`).
 
 ```bash
 swift build -c release && .build/release/Gatecaster   # or run from Xcode
@@ -54,5 +54,5 @@ Capability gate check: delete `"capabilities": ["process"]` from the manifest â†
 instead of silently spawning.
 
 ### Regression (v1 still works)
-The shipped `com.example.nowplaying` / `com.figma.shortcuts` packs must load and
+The shipped `com.gatecaster.nowplaying` / `com.figma.shortcuts` packs must load and
 render exactly as before â€” they have no `v`, migrate to v2 on load, behave identically.

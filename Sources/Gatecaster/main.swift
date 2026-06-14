@@ -766,15 +766,16 @@ final class AppController: NSObject, NSApplicationDelegate {
         let region = CGRect(x: f.minX, y: (flip - f.maxY) + header,
                             width: f.width, height: max(0, f.height - header))
         guard region.contains(cg) else { return false }
-        // Volume bars opt OUT of scroll routing: a drag there must reach the bar's
-        // SwiftUI gesture as a real mouse drag. DeckWidgets publishes each bar's
+        // Draggable controls (the built-in volume bar + extension slider/dial fields)
+        // opt OUT of scroll routing: a drag there must reach the control's SwiftUI
+        // gesture as a real mouse drag. DeckWidgets publishes each control's
         // frame via `g.frame(in: .global)`, which for an NSHostingView is the ROOT
         // hosting view's space — i.e. panel-content-LOCAL (top-left origin), NOT
         // screen-global. So map it into screen Quartz coords the same way `region`
         // is built: x += panel left (f.minX), y += panel top (flip - f.maxY).
         // (A prior "simplification" to compare cg against the raw rect placed the
         // exclusion at the wrong spot and killed the slider drag — do not re-do it.)
-        for local in DeckDragRegions.volumeRects.values {
+        for local in DeckDragRegions.dragRects.values {
             let cgRect = CGRect(x: f.minX + local.minX, y: (flip - f.maxY) + local.minY,
                                 width: local.width, height: local.height)
             if cgRect.contains(cg) { return false }

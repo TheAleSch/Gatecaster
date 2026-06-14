@@ -1,0 +1,21 @@
+{
+  "v": 2,
+  "id": "__ID__",
+  "name": "__NAME__",
+  "symbol": "arrow.clockwise",
+  "colorHex": "#30B0C7",
+  "minW": 2, "minH": 1, "defaultW": 2, "defaultH": 2,
+
+  "view": { "kind": "declarative" },
+
+  "fields": [
+    { "label": "Time", "refreshKey": "time" },
+    { "label": "Load", "refreshKey": "load" }
+  ],
+
+  "refresh": {
+    "command": "scripts/refresh.sh",
+    "everySeconds": 5,
+    "parse": { "kind": "json" }
+  }
+}

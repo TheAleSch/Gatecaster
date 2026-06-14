@@ -1100,15 +1100,16 @@ panel isn't key. Widgets (emoji grid, extension chip grid) just use a plain
 `ScrollView`. Taps still go through the click path, so buttons keep working;
 edit-mode interior drags stay mouse-drags for tile drag / resize.
 
-**Volume bars opt out.** A vertical volume bar needs a real *drag*, not a
-scroll. Each on-screen `VolumeWidget` publishes its panel-local frame to
-`DeckDragRegions.volumeRects` (keyed by widget id, cleared on disappear);
-`deckScrollRegion` maps those into screen space and returns `false` for a touch
-inside one. The engine then takes the interior `.dragging` path
-(`leftDown`+`leftDrag`), so the bar's `DragGesture` tracks the finger and sets
-the volume. Without this the whole content area scrolled and the bar never moved
-— `highPriorityGesture` on the bar couldn't help, because the engine never
-delivered a drag to begin with.
+**Draggable controls opt out.** A vertical volume bar needs a real *drag*, not a
+scroll. Each on-screen `VolumeWidget` — and every third-party extension
+`slider`/`dial` field (`InteractiveFieldView`, via the shared `DragRegion`
+modifier) — publishes its panel-local frame to `DeckDragRegions.dragRects` (keyed
+by a per-control id, cleared on disappear); `deckScrollRegion` maps those into
+screen space and returns `false` for a touch inside one. The engine then takes
+the interior `.dragging` path (`leftDown`+`leftDrag`), so the control's
+`DragGesture` tracks the finger and sets the value. Without this the whole content
+area scrolled and the control never moved — `highPriorityGesture` on the control
+couldn't help, because the engine never delivered a drag to begin with.
 
 > **Coordinate-space gotcha (do not "simplify" this mapping).** The frame each
 > `VolumeWidget` publishes comes from `GeometryReader { $0.frame(in: .global) }`.

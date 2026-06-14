@@ -1,0 +1,38 @@
+{
+  "v": 2,
+  "id": "com.gatecaster.zoom",
+  "name": "Zoom",
+  "symbol": "video.fill",
+  "colorHex": "#2D8CFF",
+  "minW": 2, "minH": 2, "defaultW": 3, "defaultH": 2,
+  "buttons": [
+    { "states": [
+        { "symbol": "mic.fill",       "label": "Mute",    "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" mute" } },
+        { "symbol": "mic.slash.fill", "label": "Unmute",  "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" mute" } }
+    ] },
+    { "states": [
+        { "symbol": "video.fill",       "label": "Stop Video",  "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" video" } },
+        { "symbol": "video.slash.fill", "label": "Start Video", "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" video" } }
+    ] },
+    { "states": [
+        { "symbol": "rectangle.on.rectangle",       "label": "Share",      "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" share" } },
+        { "symbol": "rectangle.on.rectangle.slash", "label": "Stop Share", "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" share" } }
+    ] },
+    { "states": [
+        { "symbol": "hand.raised",      "label": "Raise",  "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" raisehand" } },
+        { "symbol": "hand.raised.fill", "label": "Lower",  "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" raisehand" } }
+    ] },
+    { "states": [
+        { "symbol": "record.circle",      "label": "Record", "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" record-$config.recordingType" } },
+        { "symbol": "record.circle.fill", "label": "Stop",   "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" record-$config.recordingType" } }
+    ] },
+    { "symbol": "hands.clap.fill", "label": "Clap",  "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" react-clap" } },
+    { "symbol": "heart.fill",      "label": "Heart", "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" react-heart" } },
+    { "symbol": "phone.down.fill", "label": "Leave", "action": { "kind": "shell", "value": "\"$HOME/Library/Application Support/Gatecaster/Extensions/com.gatecaster.zoom/scripts/zoom.sh\" leave" } }
+  ],
+  "configSchema": [
+    { "key": "recordingType", "label": "Recording", "type": "select",
+      "options": ["local", "cloud"], "default": "local" }
+  ],
+  "capabilities": ["shell"]
+}
