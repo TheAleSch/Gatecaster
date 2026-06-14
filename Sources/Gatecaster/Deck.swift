@@ -15,6 +15,7 @@ enum DeckActionKind: String, Codable, CaseIterable, Identifiable {
     case volume     // set output volume to a fixed percent
     case media      // media key: play/pause, next, previous
     case page       // switch the deck to another page (by name or number)
+    case activate   // bring an app to front / launch it (the is-app-running guard, §10.5)
 
     var id: String { rawValue }
     var label: String {
@@ -28,6 +29,7 @@ enum DeckActionKind: String, Codable, CaseIterable, Identifiable {
         case .volume: return "Set Volume"
         case .media: return "Media Key"
         case .page: return "Switch Page"
+        case .activate: return "Activate App"
         }
     }
     var hint: String {
@@ -41,6 +43,7 @@ enum DeckActionKind: String, Codable, CaseIterable, Identifiable {
         case .volume: return "0–100"
         case .media: return "playpause, next, or previous"
         case .page: return "Page name or 1-based number to switch to."
+        case .activate: return "App name or path to bring to front (launches if needed)."
         }
     }
 }
@@ -294,6 +297,10 @@ enum DeckRunner {
             }
         case .page:
             switchPage(a.value)
+        case .activate:
+            // Bring the target app to front, launching if needed (§10.5). openApp
+            // already activates a running app rather than relaunching it.
+            openApp(a.value)
         }
     }
 
@@ -352,7 +359,7 @@ enum DeckRunner {
         }
     }
 
-    private static func runProcess(_ exe: String, _ args: [String]) {
+    static func runProcess(_ exe: String, _ args: [String]) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: exe)
         p.arguments = args
