@@ -74,6 +74,21 @@ struct WidgetManifest: Codable, Identifiable {
     var buttons: [ManifestButton]?       // action buttons in the tile
     var refresh: ManifestRefresh?        // optional polling command → JSON
 
+    // ── schema v2 (PLATFORM_SPEC §5) — all ADDITIVE; a v1 manifest decodes with
+    //    every one of these nil and behaves exactly as before. `schemaVersion`
+    //    (the manifest's "v") is absent/1 for v1, 2 for v2. We never read it to
+    //    GATE features (everything is tolerant), only to record provenance and
+    //    drive the migrator's normalize() pass — mirroring the Touch API's `v`
+    //    discipline: additive fields don't bump v, clients ignore unknown fields.
+    var schemaVersion: Int?              // "v"  — absent/1 = v1, 2 = v2
+    var view: ManifestView?              // presentation axis (declarative | webview)
+    var provider: ManifestProvider?      // data axis: push monitor process (§5.5/§10)
+    var actions: [String: ManifestAction]? // named, parameterized actions (§5.3)
+    var configSchema: [ManifestConfigField]? // per-instance settings form (§6)
+    var capabilities: [String]?          // declared host facilities (§8) — runtime ceiling
+    var secrets: [ManifestSecret]?       // keychain-backed token declarations (§7)
+    var oauth: ManifestOAuth?            // browser auth round-trip (§7)
+
     // Tolerant decode (forward/backward-compat). A future manifest schema that
     // adds keys must still load older manifests, and a hand-written manifest
     // missing an optional key must not nuke the whole registry reload (the `try?`
@@ -84,14 +99,23 @@ struct WidgetManifest: Codable, Identifiable {
          colorHex: String? = nil, minW: Int? = nil, minH: Int? = nil,
          defaultW: Int? = nil, defaultH: Int? = nil,
          fields: [ManifestField]? = nil, buttons: [ManifestButton]? = nil,
-         refresh: ManifestRefresh? = nil) {
+         refresh: ManifestRefresh? = nil, schemaVersion: Int? = nil,
+         view: ManifestView? = nil, provider: ManifestProvider? = nil,
+         actions: [String: ManifestAction]? = nil,
+         configSchema: [ManifestConfigField]? = nil, capabilities: [String]? = nil,
+         secrets: [ManifestSecret]? = nil, oauth: ManifestOAuth? = nil) {
         self.id = id; self.name = name; self.symbol = symbol; self.colorHex = colorHex
         self.minW = minW; self.minH = minH; self.defaultW = defaultW; self.defaultH = defaultH
         self.fields = fields; self.buttons = buttons; self.refresh = refresh
+        self.schemaVersion = schemaVersion; self.view = view; self.provider = provider
+        self.actions = actions; self.configSchema = configSchema
+        self.capabilities = capabilities; self.secrets = secrets; self.oauth = oauth
     }
     enum CodingKeys: String, CodingKey {
         case id, name, symbol, colorHex, minW, minH, defaultW, defaultH
         case fields, buttons, refresh
+        case schemaVersion = "v"
+        case view, provider, actions, configSchema, capabilities, secrets, oauth
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -106,24 +130,78 @@ struct WidgetManifest: Codable, Identifiable {
         fields = try c.decodeIfPresent([ManifestField].self, forKey: .fields)
         buttons = try c.decodeIfPresent([ManifestButton].self, forKey: .buttons)
         refresh = try c.decodeIfPresent(ManifestRefresh.self, forKey: .refresh)
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion)
+        view = try c.decodeIfPresent(ManifestView.self, forKey: .view)
+        provider = try c.decodeIfPresent(ManifestProvider.self, forKey: .provider)
+        actions = try c.decodeIfPresent([String: ManifestAction].self, forKey: .actions)
+        configSchema = try c.decodeIfPresent([ManifestConfigField].self, forKey: .configSchema)
+        capabilities = try c.decodeIfPresent([String].self, forKey: .capabilities)
+        secrets = try c.decodeIfPresent([ManifestSecret].self, forKey: .secrets)
+        oauth = try c.decodeIfPresent(ManifestOAuth.self, forKey: .oauth)
+    }
+
+    /// Presentation axis (§5.1). `declarative` (default) renders fields+buttons;
+    /// `webview` loads `entry` HTML (P1 — modelled now, rendered later). Unknown
+    /// kinds fall back to declarative so a forward manifest still shows *something*.
+    var isWebView: Bool { (view?.kind ?? "declarative") == "webview" }
+    /// Whether this tile pushes (provider) vs polls (refresh) vs neither (static).
+    var hasProvider: Bool { provider?.command.isEmpty == false }
+
+    /// §5.6 — v1→v2 migrator. The decode above is fully tolerant, so a v1 pack
+    /// already loads; this NORMALIZES it to the v2 shape so downstream code can
+    /// rely on `schemaVersion` and `view` being populated rather than re-deriving
+    /// defaults at every read site. Mirrors AppSettings' "bump and migrate, never
+    /// silently feed a stale shape" discipline (CLAUDE.md).
+    ///
+    /// Contract (§5.6):
+    ///   • `v` absent or 1  ⇒ wrap as declarative, treat refresh as parse:"json",
+    ///                         leave fields/buttons untouched. No author action.
+    ///   • `v` == 2         ⇒ already v2; only fill in implicit defaults.
+    ///   • `v` >  2         ⇒ a future/unknown schema; load tolerantly as v2
+    ///                         (additive-forward), never hard-fail.
+    func normalized() -> WidgetManifest {
+        var m = self
+        let v = m.schemaVersion ?? 1
+        m.schemaVersion = max(v, 2)                 // record provenance as ≥2 post-migrate
+        if m.view == nil { m.view = ManifestView(kind: "declarative") }
+        // A v1 `refresh` with no `parse` is implicitly JSON — make it explicit so
+        // the poll path (§5.4) has a concrete kind to switch on.
+        if m.refresh != nil, m.refresh?.parse == nil {
+            m.refresh?.parse = ManifestParse(kind: "json")
+        }
+        return m
     }
 
     struct ManifestField: Codable, Hashable {
         var label: String
         var refreshKey: String?          // key into refresh JSON; else static `value`
         var value: String?
+        // v2 (§5.2) — all additive. `type` ∈ text|image|range (default text;
+        // unknown ⇒ text, forward-compat). `image` renders the state value as a
+        // tile image (data URI / file path / provider-pushed PNG, §9). `range`
+        // draws a 0..max bar. `size` ∈ small|regular|large.
+        var type: String?
+        var size: String?
+        var min: Double?
+        var max: Double?
 
         // Tolerant decode — a field with no `label` falls back to "" rather than
         // failing the parent manifest's whole decode (forward/backward-compat).
-        init(label: String = "", refreshKey: String? = nil, value: String? = nil) {
+        init(label: String = "", refreshKey: String? = nil, value: String? = nil,
+             type: String? = nil, size: String? = nil, min: Double? = nil, max: Double? = nil) {
             self.label = label; self.refreshKey = refreshKey; self.value = value
+            self.type = type; self.size = size; self.min = min; self.max = max
         }
-        enum CodingKeys: String, CodingKey { case label, refreshKey, value }
+        enum CodingKeys: String, CodingKey { case label, refreshKey, value, type, size, min, max }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
             refreshKey = try c.decodeIfPresent(String.self, forKey: .refreshKey)
             value = try c.decodeIfPresent(String.self, forKey: .value)
+            type = try c.decodeIfPresent(String.self, forKey: .type)
+            size = try c.decodeIfPresent(String.self, forKey: .size)
+            min = try c.decodeIfPresent(Double.self, forKey: .min)
+            max = try c.decodeIfPresent(Double.self, forKey: .max)
         }
     }
     struct ManifestButton: Codable, Hashable {
@@ -140,6 +218,10 @@ struct WidgetManifest: Codable, Identifiable {
         // Multi-state button: cycles through these on each tap, showing the
         // current state's label/icon and firing its action. Supersedes toggle.
         var states: [ManifestState]?
+        // v2 (§5.3) — reference a named action by id (enables params + then).
+        // A button has EITHER inline `action` OR `run`, never both; `run` wins
+        // when present (resolved against the manifest's `actions` map).
+        var run: String?
 
         // Tolerant decode (forward/backward-compat): a button missing `action`
         // falls back to a no-op DeckAction (default kind .none) instead of
@@ -147,13 +229,13 @@ struct WidgetManifest: Codable, Identifiable {
         // better failure mode than a dropped extension.
         init(label: String? = nil, symbol: String? = nil, action: DeckAction = DeckAction(),
              toggle: Bool? = nil, altLabel: String? = nil, altSymbol: String? = nil,
-             actionAlt: DeckAction? = nil, states: [ManifestState]? = nil) {
+             actionAlt: DeckAction? = nil, states: [ManifestState]? = nil, run: String? = nil) {
             self.label = label; self.symbol = symbol; self.action = action
             self.toggle = toggle; self.altLabel = altLabel; self.altSymbol = altSymbol
-            self.actionAlt = actionAlt; self.states = states
+            self.actionAlt = actionAlt; self.states = states; self.run = run
         }
         enum CodingKeys: String, CodingKey {
-            case label, symbol, action, toggle, altLabel, altSymbol, actionAlt, states
+            case label, symbol, action, toggle, altLabel, altSymbol, actionAlt, states, run
         }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -165,6 +247,7 @@ struct WidgetManifest: Codable, Identifiable {
             altSymbol = try c.decodeIfPresent(String.self, forKey: .altSymbol)
             actionAlt = try c.decodeIfPresent(DeckAction.self, forKey: .actionAlt)
             states = try c.decodeIfPresent([ManifestState].self, forKey: .states)
+            run = try c.decodeIfPresent(String.self, forKey: .run)
         }
     }
 
@@ -189,18 +272,223 @@ struct WidgetManifest: Codable, Identifiable {
     struct ManifestRefresh: Codable, Hashable {
         var command: String              // zsh; stdout must be a flat JSON object
         var everySeconds: Double         // poll interval (min clamped to 2s)
+        // v2 (§5.4) — optional parsing of non-JSON stdout, and value remapping.
+        // Both additive: a v1 refresh with neither parses stdout as flat JSON
+        // (the original behavior) and applies no transform.
+        var parse: ManifestParse?
+        var transform: [String: ManifestTransform]?
 
         // Tolerant decode (forward/backward-compat): missing `command` → "" (no
         // poll runs) and missing `everySeconds` → 2 (the clamp floor) instead of
         // failing the manifest decode.
-        init(command: String = "", everySeconds: Double = 2) {
+        init(command: String = "", everySeconds: Double = 2,
+             parse: ManifestParse? = nil, transform: [String: ManifestTransform]? = nil) {
             self.command = command; self.everySeconds = everySeconds
+            self.parse = parse; self.transform = transform
         }
-        enum CodingKeys: String, CodingKey { case command, everySeconds }
+        enum CodingKeys: String, CodingKey { case command, everySeconds, parse, transform }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             command = try c.decodeIfPresent(String.self, forKey: .command) ?? ""
             everySeconds = try c.decodeIfPresent(Double.self, forKey: .everySeconds) ?? 2
+            parse = try c.decodeIfPresent(ManifestParse.self, forKey: .parse)
+            transform = try c.decodeIfPresent([String: ManifestTransform].self, forKey: .transform)
+        }
+    }
+
+    // MARK: - v2 nested types (§5) — all tolerant-decoding, all optional
+
+    /// §5.4 — how to turn a refresh command's stdout into a flat key→value dict.
+    /// Default (nil / kind "json") = parse stdout as flat JSON, the v1 behavior.
+    /// A delimiter spec splits ONE line into named keys: e.g. "40|0|MacBook"
+    /// + fields ["volume","muted","device"] → {volume:40, muted:0, device:MacBook}.
+    struct ManifestParse: Codable, Hashable {
+        var kind: String?                // "json" (default) | "delimited"
+        var delimiter: String?           // when delimited
+        var fields: [String]?            // names, positional
+        var trim: Bool?
+        init(kind: String? = nil, delimiter: String? = nil, fields: [String]? = nil, trim: Bool? = nil) {
+            self.kind = kind; self.delimiter = delimiter; self.fields = fields; self.trim = trim
+        }
+        enum CodingKeys: String, CodingKey { case kind, delimiter, fields, trim }
+        init(from decoder: Decoder) throws {
+            // `parse` may be the bare string "json" / a delimiter, OR an object.
+            // Accept both so authors can write `"parse":"json"` (the common case).
+            if let s = try? decoder.singleValueContainer().decode(String.self) {
+                kind = s; delimiter = nil; fields = nil; trim = nil; return
+            }
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            kind = try c.decodeIfPresent(String.self, forKey: .kind)
+            delimiter = try c.decodeIfPresent(String.self, forKey: .delimiter)
+            fields = try c.decodeIfPresent([String].self, forKey: .fields)
+            trim = try c.decodeIfPresent(Bool.self, forKey: .trim)
+        }
+    }
+
+    /// §5.4 — per-key value remap. EITHER a `$value` template string
+    /// ("Volume: $value%") OR a lookup map ({"true":"Muted","false":""}).
+    /// Tolerant: decodes whichever JSON shape is present.
+    struct ManifestTransform: Codable, Hashable {
+        var template: String?            // contains $value
+        var map: [String: String]?       // exact-match lookup
+        init(template: String? = nil, map: [String: String]? = nil) {
+            self.template = template; self.map = map
+        }
+        init(from decoder: Decoder) throws {
+            if let s = try? decoder.singleValueContainer().decode(String.self) {
+                template = s; map = nil
+            } else {
+                template = nil
+                map = try? decoder.singleValueContainer().decode([String: String].self)
+            }
+        }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.singleValueContainer()
+            if let t = template { try c.encode(t) } else { try c.encode(map ?? [:]) }
+        }
+        /// Apply to a raw value: map lookup wins; else template substitution; else identity.
+        func apply(_ raw: String) -> String {
+            if let m = map { return m[raw] ?? raw }
+            if let t = template { return t.replacingOccurrences(of: "$value", with: raw) }
+            return raw
+        }
+    }
+
+    /// §5.1 — presentation axis.
+    struct ManifestView: Codable, Hashable {
+        var kind: String?                // "declarative" (default) | "webview"
+        var entry: String?               // webview: relative HTML path in the pack
+        init(kind: String? = nil, entry: String? = nil) { self.kind = kind; self.entry = entry }
+        enum CodingKeys: String, CodingKey { case kind, entry }
+        init(from decoder: Decoder) throws {
+            if let s = try? decoder.singleValueContainer().decode(String.self) {
+                kind = s; entry = nil; return       // allow `"view":"webview"` shorthand
+            }
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            kind = try c.decodeIfPresent(String.self, forKey: .kind)
+            entry = try c.decodeIfPresent(String.self, forKey: .entry)
+        }
+    }
+
+    /// §5.5 / §10 — the push `monitor` process. Long-lived, NDJSON over stdio,
+    /// spawned on demand. `caps` is advisory (what it pushes); the HOST enforces
+    /// the real ceiling from the manifest's `capabilities` (§8), not from this.
+    struct ManifestProvider: Codable, Hashable {
+        var command: String              // e.g. "node provider.js" — relative to pack dir
+        var args: [String]?
+        var caps: [String]?              // advisory: ["state","image","devices"]
+        init(command: String = "", args: [String]? = nil, caps: [String]? = nil) {
+            self.command = command; self.args = args; self.caps = caps
+        }
+        enum CodingKeys: String, CodingKey { case command, args, caps }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            command = try c.decodeIfPresent(String.self, forKey: .command) ?? ""
+            args = try c.decodeIfPresent([String].self, forKey: .args)
+            caps = try c.decodeIfPresent([String].self, forKey: .caps)
+        }
+    }
+
+    /// §5.3 — a named, parameterized action referenced by a button's `run`.
+    /// EITHER `kind`+`value` (a safe DeckAction) OR `interpreter`+`script`
+    /// (multi-line osascript/zsh). `then:"refresh"` re-pulls after firing.
+    struct ManifestAction: Codable, Hashable {
+        var kind: String?                // safe action kind (§5.7); incl. activate/provider
+        var value: String?
+        var interpreter: String?         // "osascript" | "zsh" — alternative to kind/value
+        var script: String?
+        var params: [String]?            // names resolved from $config / caller
+        var then: String?                // "refresh" | "none" (default)
+        init(kind: String? = nil, value: String? = nil, interpreter: String? = nil,
+             script: String? = nil, params: [String]? = nil, then: String? = nil) {
+            self.kind = kind; self.value = value; self.interpreter = interpreter
+            self.script = script; self.params = params; self.then = then
+        }
+        enum CodingKeys: String, CodingKey { case kind, value, interpreter, script, params, then }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            kind = try c.decodeIfPresent(String.self, forKey: .kind)
+            value = try c.decodeIfPresent(String.self, forKey: .value)
+            interpreter = try c.decodeIfPresent(String.self, forKey: .interpreter)
+            script = try c.decodeIfPresent(String.self, forKey: .script)
+            params = try c.decodeIfPresent([String].self, forKey: .params)
+            then = try c.decodeIfPresent(String.self, forKey: .then)
+        }
+        var wantsRefresh: Bool { then == "refresh" }
+    }
+
+    /// §6 — one row of the per-instance Config Panel form.
+    struct ManifestConfigField: Codable, Hashable {
+        var key: String                  // surfaces as $config.<key>
+        var label: String?
+        var type: String?                // text|toggle|slider|select|device-picker|connect-button|secret
+        var min: Double?
+        var max: Double?
+        var `default`: String?
+        var options: [String]?           // static select options
+        var source: String?              // live options, e.g. "provider:devices"
+        var action: String?              // connect-button: named action to fire (pairing/oauth)
+        var secret: String?             // connect-button/secret: secret key to store the result
+        init(key: String = "", label: String? = nil, type: String? = nil, min: Double? = nil,
+             max: Double? = nil, default: String? = nil, options: [String]? = nil,
+             source: String? = nil, action: String? = nil, secret: String? = nil) {
+            self.key = key; self.label = label; self.type = type; self.min = min; self.max = max
+            self.default = `default`; self.options = options; self.source = source
+            self.action = action; self.secret = secret
+        }
+        enum CodingKeys: String, CodingKey {
+            case key, label, type, min, max, `default`, options, source, action, secret
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            key = try c.decodeIfPresent(String.self, forKey: .key) ?? ""
+            label = try c.decodeIfPresent(String.self, forKey: .label)
+            type = try c.decodeIfPresent(String.self, forKey: .type)
+            min = try c.decodeIfPresent(Double.self, forKey: .min)
+            max = try c.decodeIfPresent(Double.self, forKey: .max)
+            `default` = try c.decodeIfPresent(String.self, forKey: .default)
+            options = try c.decodeIfPresent([String].self, forKey: .options)
+            source = try c.decodeIfPresent(String.self, forKey: .source)
+            action = try c.decodeIfPresent(String.self, forKey: .action)
+            secret = try c.decodeIfPresent(String.self, forKey: .secret)
+        }
+    }
+
+    /// §7 — a keychain-backed secret this pack uses. Never serialized to the
+    /// manifest/settings on disk; injected into provider/command env at spawn.
+    struct ManifestSecret: Codable, Hashable {
+        var key: String                  // GATECASTER_SECRET_<KEY> in child env
+        var label: String?
+        var oauth: Bool?                 // true ⇒ obtained via the oauth flow (§7)
+        init(key: String = "", label: String? = nil, oauth: Bool? = nil) {
+            self.key = key; self.label = label; self.oauth = oauth
+        }
+        enum CodingKeys: String, CodingKey { case key, label, oauth }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            key = try c.decodeIfPresent(String.self, forKey: .key) ?? ""
+            label = try c.decodeIfPresent(String.self, forKey: .label)
+            oauth = try c.decodeIfPresent(Bool.self, forKey: .oauth)
+        }
+    }
+
+    /// §7 — browser auth round-trip. Host opens `authUrl`, catches the redirect
+    /// (loopback HTTP or registered x-gatecaster:// scheme), stores the token.
+    struct ManifestOAuth: Codable, Hashable {
+        var authUrl: String?
+        var redirect: String?            // "loopback" | "scheme"
+        var scheme: String?              // when redirect == "scheme"
+        var store: String?               // secret key to write the captured token to
+        init(authUrl: String? = nil, redirect: String? = nil, scheme: String? = nil, store: String? = nil) {
+            self.authUrl = authUrl; self.redirect = redirect; self.scheme = scheme; self.store = store
+        }
+        enum CodingKeys: String, CodingKey { case authUrl, redirect, scheme, store }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            authUrl = try c.decodeIfPresent(String.self, forKey: .authUrl)
+            redirect = try c.decodeIfPresent(String.self, forKey: .redirect)
+            scheme = try c.decodeIfPresent(String.self, forKey: .scheme)
+            store = try c.decodeIfPresent(String.self, forKey: .store)
         }
     }
 }
@@ -228,7 +516,7 @@ final class WidgetRegistry: ObservableObject {
                 let manifestURL = dir.appendingPathComponent("manifest.json")
                 if let data = try? Data(contentsOf: manifestURL),
                    let m = try? JSONDecoder().decode(WidgetManifest.self, from: data) {
-                    found.append(m)
+                    found.append(m.normalized())   // §5.6 v1→v2 migrate on load
                 }
             }
         }
@@ -240,39 +528,127 @@ final class WidgetRegistry: ObservableObject {
 
 // MARK: - live values for extension refresh commands
 
-/// Runs an extension's refresh command on a timer and publishes the parsed
-/// JSON. One instance per visible extension widget.
+/// Backs one visible extension tile. A tile is EITHER poll (`refresh`) OR push
+/// (`provider`), never both (PLATFORM_SPEC §5.4). Both paths converge on the same
+/// `values` dict — `fields[].refreshKey` reads it and (later) the WebView bridge
+/// exposes it — so the tile renders identically regardless of data source.
 final class WidgetDataSource: ObservableObject {
     @Published var values: [String: String] = [:]
+    @Published var images: [String: Data] = [:]    // §9 dynamic tile images, by field key
+    @Published var providerError: String?          // surfaced stale-not-wedged state
     private var timer: Timer?
+    private var refresh: WidgetManifest.ManifestRefresh?   // retained for then:"refresh" re-poll
+    // Provider push (§10). We hold the instance id so stop() can release our
+    // ref-count with the host (the last release reaps the process).
+    private weak var provider: ProviderProcess?
+    private var providerInstance: UUID?
+
+    // MARK: poll (§5.4)
 
     func start(_ refresh: WidgetManifest.ManifestRefresh) {
         stop()
+        self.refresh = refresh
         let interval = max(2, refresh.everySeconds)
-        let run = { [weak self] in self?.poll(refresh.command) }
+        let run = { [weak self] in self?.poll(refresh) }
         run()
         let t = Timer(timeInterval: interval, repeats: true) { _ in run() }
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
-    func stop() { timer?.invalidate(); timer = nil }
+
+    /// Re-run the poll immediately (the `then:"refresh"` loop on a button action).
+    func repoll() {
+        if let r = refresh { poll(r) }
+        else { provider?.requestRefresh() }
+    }
+
+    /// Forward a `provider`-kind action to this tile's running provider (§10.3).
+    func sendToProvider(action: String, params: [String: String]) {
+        provider?.send(action: action, params: params)
+    }
+
+    // MARK: push (§10)
+
+    /// Acquire this tile instance's provider and route its patches into `values`.
+    /// Returns the process so the tile can forward `provider`-kind button commands.
+    @discardableResult
+    func startProvider(_ manifest: WidgetManifest, instance: UUID,
+                       config: [String: String]) -> ProviderProcess? {
+        stop()
+        guard let proc = ProviderHost.shared.acquire(manifest: manifest,
+                                                     instance: instance, config: config)
+        else {
+            // No provider, or `process` capability not granted (§9.3 L4) — show a
+            // clear error rather than a silently-dead tile.
+            DispatchQueue.main.async { [weak self] in
+                self?.providerError = "Provider unavailable (missing `process` capability?)"
+            }
+            return nil
+        }
+        let transform = manifest.refresh?.transform   // provider tiles may still declare transforms
+        proc.onState = { [weak self] patch in
+            guard let self else { return }
+            // Shallow-merge the patch into our state, applying any per-key transform.
+            var v = self.values
+            for (k, raw) in patch { v[k] = transform?[k]?.apply(raw) ?? raw }
+            self.values = v
+            self.providerError = nil
+        }
+        proc.onImage = { [weak self] field, data in self?.images[field] = data }
+        proc.onError = { [weak self] msg in self?.providerError = msg }
+        provider = proc
+        providerInstance = instance
+        return proc
+    }
+
+    func stop() {
+        timer?.invalidate(); timer = nil
+        if let inst = providerInstance { ProviderHost.shared.release(instance: inst) }
+        provider = nil; providerInstance = nil
+    }
     deinit { stop() }
 
-    private func poll(_ command: String) {
+    private func poll(_ refresh: WidgetManifest.ManifestRefresh) {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            p.arguments = ["-lc", command]
+            p.arguments = ["-lc", refresh.command]
             let pipe = Pipe(); p.standardOutput = pipe
             p.standardError = FileHandle.nullDevice
             guard (try? p.run()) != nil else { return }
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             p.waitUntilExit()
-            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                let strings = obj.mapValues { "\($0)" }
-                DispatchQueue.main.async { self?.values = strings }
+            guard let raw = Self.parse(data, with: refresh.parse) else { return }
+            // Apply per-key transforms (§5.4): map lookup or $value template.
+            var out = raw
+            if let tf = refresh.transform {
+                for (k, t) in tf where out[k] != nil { out[k] = t.apply(out[k]!) }
             }
+            DispatchQueue.main.async { self?.values = out }
         }
+    }
+
+    /// §5.4 — turn a refresh command's stdout into a flat key→value dict.
+    /// nil / kind "json" = parse stdout as a flat JSON object (the v1 behavior).
+    /// A delimited spec splits the FIRST non-empty line into the named fields.
+    private static func parse(_ data: Data,
+                              with spec: WidgetManifest.ManifestParse?) -> [String: String]? {
+        let kind = spec?.kind ?? "json"
+        if kind == "delimited", let delim = spec?.delimiter, let names = spec?.fields {
+            guard let text = String(data: data, encoding: .utf8) else { return nil }
+            let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+            let parts = line.components(separatedBy: delim)
+            var out: [String: String] = [:]
+            for (i, name) in names.enumerated() where i < parts.count {
+                let v = parts[i]
+                out[name] = (spec?.trim == true) ? v.trimmingCharacters(in: .whitespaces) : v
+            }
+            return out
+        }
+        // Default: flat JSON object on stdout.
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return obj.mapValues { "\($0)" }
     }
 }
 
@@ -469,7 +845,7 @@ struct WidgetTile: View {
         default:
             if let id = widget.extensionId,
                let m = WidgetRegistry.shared.manifest(id: id) {
-                ExtensionWidget(manifest: m, config: $widget.config)
+                ExtensionWidget(manifest: m, instance: widget.id, config: $widget.config)
             } else {
                 MissingWidget(id: widget.extensionId ?? widget.kind)
             }
@@ -663,6 +1039,7 @@ private struct MediaWidget: View {
 /// Third-party: declarative tile driven by a manifest + optional refresh poll.
 private struct ExtensionWidget: View {
     let manifest: WidgetManifest
+    let instance: UUID                           // stable tile-instance id (provider keying)
     @Binding var config: [String: String]       // persists toggle/multi-state across redraws
     @StateObject private var data = WidgetDataSource()
 
@@ -704,7 +1081,15 @@ private struct ExtensionWidget: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear { if let r = manifest.refresh { data.start(r) } }
+        // Data axis (§5.4): a tile is push (provider) OR poll (refresh) OR static.
+        // Provider wins when present; the host ref-counts spawn/reap by instance.
+        .onAppear {
+            if manifest.hasProvider {
+                data.startProvider(manifest, instance: instance, config: config)
+            } else if let r = manifest.refresh {
+                data.start(r)
+            }
+        }
         .onDisappear { data.stop() }
     }
 
@@ -731,10 +1116,12 @@ private struct ExtensionWidget: View {
                 DeckRunner.run(states[i].action)
                 setStateIndex(index, (i + 1) % states.count)
             } else if b.toggle == true {
-                if isOn(index) { setOn(index, false); DeckRunner.run(b.actionAlt ?? b.action) }
-                else { setOn(index, true); DeckRunner.run(b.action) }
+                if isOn(index) { setOn(index, false); fire(b.actionAlt ?? b.action) }
+                else { setOn(index, true); fire(b.action) }
+            } else if let ref = b.run {
+                fireNamed(ref)                       // §5.3 — named action (params + then)
             } else {
-                DeckRunner.run(b.action)
+                fire(b.action)
             }
         } label: {
             VStack(spacing: 3) {
@@ -754,6 +1141,65 @@ private struct ExtensionWidget: View {
     private func value(for f: WidgetManifest.ManifestField) -> String {
         if let key = f.refreshKey, let v = data.values[key] { return v }
         return f.value ?? "—"
+    }
+
+    // MARK: - action firing (inline + named, §5.3/§5.7)
+
+    /// Fire an inline `action`, substituting `$config.<key>` in its value first.
+    private func fire(_ a: DeckAction) {
+        DeckRunner.run(DeckAction(kind: a.kind, value: substitute(a.value)))
+    }
+
+    /// Fire a named action referenced by a button's `run` (§5.3). Resolves the
+    /// `actions` map, enforces the capability ceiling (§8/§9.3 L4), handles the
+    /// `provider`/`interpreter` forms the declarative `DeckAction` can't express,
+    /// and runs `then:"refresh"` to close the tap→state loop.
+    private func fireNamed(_ ref: String) {
+        guard let act = manifest.actions?[ref] else { return }
+        let caps = PluginCapabilities(manifest)
+
+        if let kind = act.kind {
+            // Capability gate: a privileged kind runs only if declared (§9.3 L4).
+            guard caps.allows(kind: kind) else {
+                data.providerError = "Action “\(ref)” needs the `\(kind)` capability"
+                return
+            }
+            if kind == "provider" {
+                // Forward to this tile's running provider over its stdin (§10.3).
+                data.sendToProvider(action: substitute(act.value ?? ""),
+                                    params: resolveParams(act.params))
+            } else if let mapped = DeckActionKind(rawValue: kind) {
+                DeckRunner.run(DeckAction(kind: mapped, value: substitute(act.value ?? "")))
+            }
+        } else if let interp = act.interpreter, let script = act.script {
+            // Multi-line osascript/zsh (§5.7) — gated by `shell`.
+            guard caps.canRunShell else {
+                data.providerError = "Action “\(ref)” needs the `shell` capability"
+                return
+            }
+            let exe = interp == "osascript" ? "/usr/bin/osascript" : "/bin/zsh"
+            let args = interp == "osascript" ? ["-e", substitute(script)]
+                                             : ["-lc", substitute(script)]
+            DeckRunner.runProcess(exe, args)
+        }
+
+        if act.wantsRefresh { data.repoll() }   // then:"refresh"
+    }
+
+    /// Replace `$config.<key>` tokens with the per-instance config value (§5.8/§6).
+    private func substitute(_ s: String) -> String {
+        var out = s
+        for (k, v) in config where k.hasPrefix("$") == false {
+            out = out.replacingOccurrences(of: "$config.\(k)", with: v)
+        }
+        return out
+    }
+
+    /// Resolve a named action's `params` to a {name: value} dict from `$config`.
+    private func resolveParams(_ names: [String]?) -> [String: String] {
+        var out: [String: String] = [:]
+        for n in names ?? [] { out[n] = config[n] ?? "" }
+        return out
     }
 }
 

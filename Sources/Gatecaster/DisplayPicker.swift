@@ -46,3 +46,34 @@ struct DisplayPickerView: View {
         }
     }
 }
+
+/// Corner badge shown on each display during the onboarding Monitor step.
+/// Identify-first (touch can't safely pick before a display is bound — see
+/// spec), but a MOUSE click is accepted as a pick.
+struct IdentifyBadgeView: View {
+    let number: Int
+    let name: String
+    var onPick: () -> Void
+
+    var body: some View {
+        Button(action: onPick) {
+            VStack(spacing: 2) {
+                Text("\(number)")
+                    .font(.system(size: 44, weight: .bold))
+                Text(name)
+                    .font(.system(size: 11))
+                    .opacity(0.75)
+                    .lineLimit(1)
+            }
+            .foregroundColor(.white)
+            .frame(width: 150, height: 90)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.black.opacity(0.78))
+                    .overlay(RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.white.opacity(0.35), lineWidth: 1))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}

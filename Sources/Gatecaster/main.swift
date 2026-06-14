@@ -2,17 +2,20 @@ import Cocoa
 import CoreGraphics
 import SwiftUI
 import Combine
+import IOKit.hid
 
 final class AppController: NSObject, NSApplicationDelegate {
     let settings = AppSettings.shared
     let engine = Engine()
     let hid = HidTouch()
     let capture = Capture()
+    let api = TouchAPIServer()
     var statusItem: NSStatusItem!
 
     private var settingsWindow: NSWindow?
     private var calibrationWindow: NSWindow?
     private var calController: CalibrationController?
+    private var onboarding: OnboardingController?
     private var selectedDisplay = CGMainDisplayID()
     private var pickerWindows: [NSWindow] = []
     private var keyMonitor: Any?
@@ -36,6 +39,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var deckFullScreenRestore: NSRect?
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        warnIfNotShippable()
         // SINGLE INSTANCE: two engines fighting over the same HID device put the
         // cursor on the wrong display and double-post events. The fresh launch
         // wins — older instances are told to quit (covers `open -n` relaunches
@@ -53,10 +57,9 @@ final class AppController: NSObject, NSApplicationDelegate {
         rebuildMenu()
         observeSettingsRequests()
 
-        // Without Accessibility, every event we post is silently dropped — ask up
-        // front instead of looking broken. (Input Monitoring is prompted by HID.)
-        let axOpts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        if !AXIsProcessTrustedWithOptions(axOpts) {
+        // Permission prompting now lives in onboarding's Permissions step;
+        // just log so a headless launch isn't silently dead.
+        if !AXIsProcessTrusted() {
             FileHandle.standardError.write(
                 Data("[gatecaster] waiting for Accessibility permission…\n".utf8))
         }
@@ -79,20 +82,38 @@ final class AppController: NSObject, NSApplicationDelegate {
         engine.onNotificationCenter = { [weak self] in
             DispatchQueue.main.async { self?.openNotificationCenter() }
         }
+
+        // Touch API: stream this frame's contacts / gestures to any connected
+        // third-party client, and let a client suppress our own input injection.
+        engine.onTouchFrame = { [weak self] raw, accepted in
+            self?.api.publishFingers(raw: raw, accepted: accepted)
+        }
+        engine.onGesture = { [weak self] g in self?.api.publishGesture(g) }
+        api.onSuppress = { [weak self] input, gestures, edges in
+            Pointer.suppressInput = input
+            GestureSynth.suppressGestures = gestures
+            self?.engine.apiSuppressEdges = edges
+        }
+
         engine.start()
         hid.start()
+        api.start()
 
-        // Resolve the saved monitor by its STABLE uuid. If it's connected, use it
-        // (no prompt). If we'd picked one before but it's genuinely absent and there's
-        // more than one screen to choose from, ask again. First run → ask.
-        if let id = displayID(forUUID: settings.displayUUID) {
-            applyDisplay(id)
-        } else if settings.hasPickedDisplay && NSScreen.screens.count > 1 {
-            startDisplayPicker()
-        } else if settings.hasPickedDisplay {
-            applyDisplay(CGMainDisplayID())   // single screen: just use it, don't nag
+        // First-run (or resumed) onboarding replaces the bare display picker.
+        // Existing users with everything granted never see it (hasOnboarded is
+        // migrated from hasPickedDisplay). Existing users MISSING a permission
+        // get dropped directly on the Permissions step — no intro, no welcome.
+        let permissionsOK = AXIsProcessTrusted() &&
+            IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+        if !settings.hasOnboarded {
+            // Mid-flow relaunch (TCC grant) resumes at the persisted stage.
+            let resume = settings.onboardingStage > 0
+                ? OnboardingStage(rawValue: settings.onboardingStage) : nil
+            startOnboarding(resumeAt: resume)
+        } else if !permissionsOK {
+            startOnboarding(resumeAt: .permissions)
         } else {
-            startDisplayPicker()
+            resolveSavedDisplay()
         }
 
         // Apply the chosen display whenever it changes from the Settings dropdown,
@@ -120,7 +141,10 @@ final class AppController: NSObject, NSApplicationDelegate {
             self, selector: #selector(panelFrameChanged(_:)),
             name: NSWindow.didResizeNotification, object: nil)
 
-        if settings.showFloatingControl { showFloatingControl() }
+        // Defer the launcher past onboarding: it's a .floating panel and would pop
+        // OVER the .normal-level onboarding window (the vortex). onFinished shows it
+        // once setup completes; already-onboarded launches (onboarding == nil) show now.
+        if settings.showFloatingControl && onboarding == nil { showFloatingControl() }
         floatBag = settings.$showFloatingControl.dropFirst().receive(on: RunLoop.main)
             .sink { [weak self] on in
                 if on { self?.showFloatingControl() } else { self?.hideFloatingControl() }
@@ -180,12 +204,24 @@ final class AppController: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
 
         item(menu, "Settings…", #selector(openSettings))
+        // Pro status / unlock entry point.
+        if settings.proUnlocked {
+            let pro = NSMenuItem(
+                title: settings.licensedTo.isEmpty ? "Gatecaster Pro ✓"
+                                                   : "Gatecaster Pro ✓ — \(settings.licensedTo)",
+                action: nil, keyEquivalent: "")
+            pro.isEnabled = false
+            menu.addItem(pro)
+        } else {
+            item(menu, "Unlock Pro…", #selector(promptForLicense))
+        }
         item(menu, "Show / Hide Touch Keyboard", #selector(toggleKeyboard))
         item(menu, "Show / Hide Virtual Trackpad", #selector(toggleTrackpad))
         item(menu, "Show / Hide Deck", #selector(toggleDeck))
         item(menu, "Show / Hide Floating Control", #selector(toggleFloatingControl))
         item(menu, "Choose Touchscreen Display…", #selector(startDisplayPicker))
         item(menu, "Calibrate Touchscreen…", #selector(startCalibration))
+        item(menu, "Setup Assistant…", #selector(startSetupAssistant))
         item(menu, "Reconnect Touchscreen", #selector(reconnectTouch))
 
         menu.addItem(.separator())
@@ -217,6 +253,88 @@ final class AppController: NSObject, NSApplicationDelegate {
         menu.addItem(it)
     }
 
+    // MARK: licensing (Pro unlock)
+    // Where the $24 Pro license is purchased. Replace with the real checkout URL.
+    private static let purchaseURL = URL(string: "https://gatecaster.app/buy")!
+
+    /// Loud stderr nag while the dev stubs are still in place — covers the bare
+    /// `swift build` + run path the build scripts can't see. Self-clears the moment
+    /// the dev key / placeholder URL is replaced. See docs/PRE-RELEASE-CHECKLIST.md.
+    private func warnIfNotShippable() {
+        let placeholderURL = Self.purchaseURL.absoluteString == "https://gatecaster.app/buy"
+        guard License.isDevelopmentKey || placeholderURL else { return }
+        var lines = ["⚠️  Gatecaster: NOT shippable yet (docs/PRE-RELEASE-CHECKLIST.md):"]
+        if License.isDevelopmentKey {
+            lines.append("   • License.swift uses the DEV signing key — regenerate: swift scripts/gen-keypair.swift")
+        }
+        if placeholderURL {
+            lines.append("   • purchaseURL is still the placeholder — set your real checkout URL")
+        }
+        FileHandle.standardError.write(Data((lines.joined(separator: "\n") + "\n").utf8))
+    }
+
+    /// Gate for a Pro-only feature. Returns true if Pro is unlocked; otherwise shows
+    /// the paywall and returns false. Called at each feature's activation point (the
+    /// Deck, on-screen keyboard, virtual trackpad) — never on the Engine's hot path.
+    @discardableResult
+    private func requirePro(_ feature: String) -> Bool {
+        if settings.proUnlocked { return true }
+        presentPaywall(feature: feature)
+        return false
+    }
+
+    private func presentPaywall(feature: String) {
+        let a = NSAlert()
+        a.messageText = "\(feature) is a Gatecaster Pro feature"
+        a.informativeText = """
+            The driver, gestures, and Touch API are free. The Deck, on-screen \
+            keyboard, and virtual trackpad are part of Gatecaster Pro — a one-time \
+            $24 unlock.
+
+            Already bought it? Enter your license key to unlock.
+            """
+        a.addButton(withTitle: "Buy Pro…")
+        a.addButton(withTitle: "Enter License…")
+        a.addButton(withTitle: "Not Now")
+        switch a.runModal() {
+        case .alertFirstButtonReturn:  NSWorkspace.shared.open(Self.purchaseURL)
+        case .alertSecondButtonReturn: promptForLicense()
+        default: break
+        }
+    }
+
+    /// Prompt for a license key, verify it, and persist on success. Invalid keys
+    /// report back so a typo is visible rather than silently ignored.
+    @objc private func promptForLicense() {
+        let a = NSAlert()
+        a.messageText = "Enter your Gatecaster Pro license key"
+        a.informativeText = "Paste the key from your purchase email."
+        a.addButton(withTitle: "Unlock")
+        a.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 340, height: 24))
+        field.placeholderString = "license key"
+        field.stringValue = settings.licenseKey
+        a.accessoryView = field
+        a.window.initialFirstResponder = field
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+
+        let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if License.verify(key)?.tier == .pro {
+            settings.licenseKey = key      // didSet flips proUnlocked; autosave persists it
+            rebuildMenu()
+            let ok = NSAlert()
+            ok.messageText = "Gatecaster Pro unlocked"
+            if !settings.licensedTo.isEmpty { ok.informativeText = "Licensed to \(settings.licensedTo)." }
+            ok.runModal()
+        } else {
+            let bad = NSAlert()
+            bad.alertStyle = .warning
+            bad.messageText = "That license key isn't valid"
+            bad.informativeText = "Check for a copy/paste error, or contact support."
+            bad.runModal()
+        }
+    }
+
     // MARK: display binding & hotplug recovery
     /// Point the engine at a display id, falling back to the main display if that
     /// id isn't currently connected (the saved preference is kept either way).
@@ -230,6 +348,11 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         clampAllPanels()    // touch UI follows the touch display
         refreshEdgeHints()  // reposition strips too
+        // Keep the Touch API's advertised geometry in sync with the active display
+        // + calibration, so a client's hello carries the right screen/panel bounds.
+        api.updateGeometry(screen: engine.bounds,
+                           cal: (settings.calXMin, settings.calXMax,
+                                 settings.calYMin, settings.calYMax))
     }
 
     // MARK: edge-zone hint strips (DEBUG visual only; mouse events pass through)
@@ -275,6 +398,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         // falls back to main while it's gone.
         if let id = displayID(forUUID: settings.displayUUID) { applyDisplay(id) }
         else { applyDisplay(CGMainDisplayID()) }
+        onboarding?.screensChanged()        // monitor step refreshes rows + badges
     }
 
     // MARK: keep touch UI on the touch display
@@ -388,6 +512,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func showKeyboard() {
         guard keyboardPanel == nil else { return }
+        guard requirePro("The on-screen keyboard") else { return }
         // Non-activating panel: tapping a key never steals focus from the app you're typing into.
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 820, height: 360),
                             styleMask: [.nonactivatingPanel, .borderless],
@@ -526,6 +651,9 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func showTrackpad() {
         guard trackpadPanel == nil else { return }
+        // Gate at activation, not in the hot path. Clear the bound toggle so it
+        // reflects the locked state (and so the $showTrackpad sink doesn't re-fire).
+        guard requirePro("The virtual trackpad") else { settings.showTrackpad = false; return }
         let view = TrackpadView(settings: settings) { [weak self] in
             self?.settings.showTrackpad = false
         }
@@ -556,6 +684,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func showDeck() {
         guard deckPanel == nil else { return }
+        guard requirePro("The Deck") else { settings.showDeck = false; return }
         let view = DeckView(store: DeckStore.shared, settings: settings) { [weak self] in
             self?.settings.showDeck = false
         }
@@ -776,6 +905,59 @@ final class AppController: NSObject, NSApplicationDelegate {
         startCalibration()      // flow straight into corner calibration
     }
 
+    // MARK: onboarding
+    /// The old launch-time display resolution, reused after onboarding finishes.
+    private func resolveSavedDisplay() {
+        if let id = displayID(forUUID: settings.displayUUID) {
+            applyDisplay(id)
+        } else if settings.hasPickedDisplay && NSScreen.screens.count > 1 {
+            startDisplayPicker()
+        } else if settings.hasPickedDisplay {
+            applyDisplay(CGMainDisplayID())   // single screen: just use it, don't nag
+        } else {
+            startDisplayPicker()
+        }
+    }
+
+    private func startOnboarding(resumeAt: OnboardingStage?) {
+        guard onboarding == nil else { return }
+        let ob = OnboardingController(settings: settings)
+        ob.onPickDisplay = { [weak self] n in self?.onboardingPickDisplay(n) }
+        ob.onStartCalibration = { [weak self] in self?.startCalibration() }
+        ob.onFinished = { [weak self] in
+            guard let self = self else { return }
+            self.onboarding = nil
+            self.resolveSavedDisplay()   // bind whatever was picked (or re-ask)
+            // Now that onboarding is gone, honor the default-on launcher (deferred at launch).
+            if self.settings.showFloatingControl { self.showFloatingControl() }
+            self.rebuildMenu()
+        }
+        onboarding = ob
+        ob.show(resumeAt: resumeAt)
+    }
+
+    /// Setup Assistant menu item: full flow from the top, intro included.
+    @objc private func startSetupAssistant() {
+        guard onboarding == nil else { return }   // already running — ignore re-click, don't clobber the persisted stage
+        settings.onboardingStage = 0
+        startOnboarding(resumeAt: nil)
+    }
+
+    /// Monitor-step pick: bind + persist, but do NOT auto-start calibration —
+    /// onboarding's Calibration step owns that handoff (it has its own intro).
+    private func onboardingPickDisplay(_ number: Int) {
+        let screens = NSScreen.screens
+        guard number >= 1, number <= screens.count else { return }
+        if let id = (screens[number - 1].deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
+                        as? NSNumber)?.uint32Value {
+            applyDisplay(id)
+            settings.displayID = Double(id)
+            settings.displayUUID = uuid(for: id) ?? ""
+            settings.hasPickedDisplay = true
+            settings.save()
+        }
+    }
+
     private func teardownDisplayPicker() {
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         pickerWindows.forEach { $0.orderOut(nil) }
@@ -815,6 +997,11 @@ final class AppController: NSObject, NSApplicationDelegate {
         calibrationWindow?.orderOut(nil)
         calibrationWindow = nil
         calController = nil
+        onboarding?.calibrationFinished()   // onboarding shows its close-out card
+        // Refresh the Touch API hello geometry with the new calibration.
+        api.updateGeometry(screen: engine.bounds,
+                           cal: (settings.calXMin, settings.calXMax,
+                                 settings.calYMin, settings.calYMax))
     }
 
     // MARK: actions

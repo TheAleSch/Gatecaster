@@ -1,0 +1,61 @@
+<style>
+@keyframes drift { from { transform: translateY(0) } to { transform: translateY(-400px) } }
+@keyframes pulse { 0%,100% { opacity:.55; transform:scale(1) } 50% { opacity:1; transform:scale(1.06) } }
+@keyframes fadeUp { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
+.stars { position:absolute; inset:0; overflow:hidden; border-radius:inherit; }
+.stars span { position:absolute; background:#fff; border-radius:50%; animation: drift linear infinite; }
+.gate-ring { width:96px;height:96px;border-radius:50%;
+  background:radial-gradient(circle,rgba(122,92,255,.35),transparent 65%);
+  border:2px solid rgba(140,110,255,.7); box-shadow:0 0 40px rgba(122,92,255,.55), inset 0 0 24px rgba(122,92,255,.4);
+  display:flex;align-items:center;justify-content:center; animation: pulse 3.2s ease-in-out infinite; }
+.fade1 { animation: fadeUp .8s ease-out both .2s } .fade2 { animation: fadeUp .8s ease-out both .5s } .fade3 { animation: fadeUp .8s ease-out both .8s }
+</style>
+
+<h2>Animated welcome — "through the gate"</h2>
+<p class="subtitle">Drifting starfield + pulsing gate ring + staggered fade-in. SwiftUI: TimelineView/Canvas particles, honors Reduce Motion.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Welcome step, animated</div>
+  <div class="mockup-body" style="background:#000;padding:30px;display:flex;justify-content:center">
+    <div style="position:relative;width:480px;height:420px;border-radius:16px;border:1px solid #2c2c3a;overflow:hidden;background:radial-gradient(ellipse 80% 60% at 50% -10%,#1b1233 0%,#0a0a12 55%,#050508 100%)">
+      <div class="stars">
+        <span style="left:8%;top:110%;width:2px;height:2px;animation-duration:9s"></span>
+        <span style="left:18%;top:120%;width:1px;height:1px;animation-duration:14s;opacity:.6"></span>
+        <span style="left:30%;top:105%;width:2px;height:2px;animation-duration:11s"></span>
+        <span style="left:42%;top:115%;width:1px;height:1px;animation-duration:16s;opacity:.5"></span>
+        <span style="left:55%;top:108%;width:2px;height:2px;animation-duration:10s"></span>
+        <span style="left:66%;top:118%;width:1px;height:1px;animation-duration:13s;opacity:.6"></span>
+        <span style="left:76%;top:112%;width:2px;height:2px;animation-duration:12s"></span>
+        <span style="left:88%;top:122%;width:1px;height:1px;animation-duration:15s;opacity:.5"></span>
+        <span style="left:13%;top:160%;width:1px;height:1px;animation-duration:18s;opacity:.4"></span>
+        <span style="left:50%;top:150%;width:2px;height:2px;animation-duration:17s;opacity:.7"></span>
+        <span style="left:83%;top:155%;width:1px;height:1px;animation-duration:19s;opacity:.4"></span>
+        <span style="left:25%;top:170%;width:2px;height:2px;animation-duration:20s;opacity:.5"></span>
+      </div>
+      <div style="position:relative;display:flex;flex-direction:column;align-items:center;padding-top:46px;color:#eee;text-align:center">
+        <div class="gate-ring fade1"><span style="font-size:40px">👆</span></div>
+        <div class="fade2" style="font-size:23px;font-weight:700;letter-spacing:-.4px;margin-top:20px">Welcome to Gatecaster</div>
+        <div class="fade2" style="font-size:12px;opacity:.6;margin-top:6px">Your touchscreen, cast into a true Mac input surface.</div>
+        <div class="fade3" style="margin-top:22px;display:flex;flex-direction:column;gap:10px;text-align:left;font-size:12px">
+          <div>🌀 <b>Open the gate</b> — pointer, taps, drags, native gestures</div>
+          <div>✨ <b>Cast across space</b> — pinch, rotate, momentum scroll</div>
+          <div>🛰️ <b>Summon controls</b> — keyboard, trackpad &amp; deck on tap</div>
+        </div>
+        <div class="fade3" style="background:linear-gradient(180deg,#7a5cff,#5b3df0);border-radius:9px;padding:9px 38px;font-size:13px;font-weight:600;color:#fff;margin-top:24px;box-shadow:0 4px 18px rgba(122,92,255,.4)">Get Started</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="options" style="margin-top:18px">
+  <div class="option" data-choice="window" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content"><h3>Large centered window (~780×620)</h3>
+    <p>Raycast's actual approach — big window, animated background inside it, all 4 steps live here. Dismissable, less intrusive.</p></div>
+  </div>
+  <div class="option" data-choice="fullscreen" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content"><h3>True full-screen takeover</h3>
+    <p>Welcome covers the whole main display, starfield edge-to-edge — maximum magic. Steps 1-3 either stay full-screen or shrink to the window after welcome.</p></div>
+  </div>
+</div>

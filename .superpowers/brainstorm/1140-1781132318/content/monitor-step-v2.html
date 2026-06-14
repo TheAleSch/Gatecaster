@@ -1,0 +1,57 @@
+<h2>Hybrid monitor step</h2>
+<p class="subtitle">When step 3 activates, number overlays appear on all displays automatically AND the window lists them. Either input works: tap the badge on the physical touchscreen, or click the row in the window.</p>
+
+<div class="mockup">
+  <div class="mockup-header">What's on the physical screens during step 3</div>
+  <div class="mockup-body" style="background:#0a0a0a;padding:20px;display:flex;gap:16px;justify-content:center;align-items:flex-start">
+    <!-- display 1: has the onboarding window -->
+    <div style="position:relative;background:#161618;border:1px solid #333;border-radius:10px;width:340px;height:212px;overflow:hidden">
+      <div style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.7);border-radius:8px;padding:4px 12px;color:#fff;font-size:22px;font-weight:700">1</div>
+      <!-- onboarding window -->
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+        <div style="background:#1f1f21;border:1px solid #3a3a3c;border-radius:10px;width:240px;padding:14px;color:#eee;box-shadow:0 8px 30px rgba(0,0,0,.6)">
+          <div style="font-size:13px;font-weight:600;margin-bottom:2px">Which display is the touchscreen?</div>
+          <div style="font-size:10px;opacity:.55;margin-bottom:8px">Tap the number on the touchscreen itself, or choose below.</div>
+          <div style="background:#2a2a2c;border-radius:6px;padding:6px 8px;margin-bottom:4px;font-size:11px;display:flex;justify-content:space-between">
+            <span>① Built-in Display</span><span style="opacity:.5">2560×1664</span>
+          </div>
+          <div style="background:#2a2a2c;border-radius:6px;padding:6px 8px;font-size:11px;display:flex;justify-content:space-between">
+            <span>② V17UT</span><span style="opacity:.5">1920×1080</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+            <div style="display:flex;gap:4px">
+              <div style="width:6px;height:6px;border-radius:3px;background:#666"></div>
+              <div style="width:6px;height:6px;border-radius:3px;background:#666"></div>
+              <div style="width:6px;height:6px;border-radius:3px;background:#4a8cff"></div>
+              <div style="width:6px;height:6px;border-radius:3px;background:#333"></div>
+            </div>
+            <span style="font-size:10px;opacity:.4">Step 3 of 4</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- display 2: the touchscreen, big tappable overlay -->
+    <div style="position:relative;background:#161618;border:1px solid #4a8cff;border-radius:10px;width:300px;height:188px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff">
+      <div style="font-size:64px;font-weight:800;line-height:1">2</div>
+      <div style="font-size:12px;opacity:.7;margin-top:6px">V17UT</div>
+      <div style="font-size:11px;opacity:.5;margin-top:10px;background:rgba(74,140,255,.15);border:1px solid rgba(74,140,255,.4);border-radius:14px;padding:4px 12px">👆 Tap here if this is your touchscreen</div>
+    </div>
+  </div>
+</div>
+
+<div class="options" style="margin-top:18px">
+  <div class="option" data-choice="full-overlay" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Overlays = full-screen scrim (like today)</h3>
+      <p>Whole non-window display dims with big number + "tap here" hint. Unmissable; reuses today's picker windows.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="badge" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Overlays = corner badges only</h3>
+      <p>Small number badge per display (like System Settings identify). Less intrusive but small tap target on the touchscreen.</p>
+    </div>
+  </div>
+</div>

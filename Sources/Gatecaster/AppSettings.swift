@@ -125,6 +125,22 @@ final class AppSettings: ObservableObject {
     @Published var calYMin = 0.0
     @Published var calYMax = 1856.0
 
+    // MARK: licensing (Pro unlock)
+    // The signed license key the user pasted (empty = free tier). Persisted like any
+    // other setting. `proUnlocked` is the cached verification result — recomputed
+    // only when the key changes, never on the Engine's per-frame read path.
+    @Published var licenseKey = "" { didSet { recomputeLicense() } }
+    /// True iff `licenseKey` is a valid Pro license. Gates the Deck, on-screen
+    /// keyboard, and virtual trackpad; the free core driver + Touch API ignore it.
+    private(set) var proUnlocked = false
+    /// Who the active license was issued to (for display); empty on free tier.
+    private(set) var licensedTo = ""
+    private func recomputeLicense() {
+        let p = License.verify(licenseKey)
+        proUnlocked = p?.tier == .pro
+        licensedTo = p?.name ?? ""
+    }
+
     // Live info (not persisted): the touch controller currently attached.
     @Published var connectedHardware = "Not connected"
 
@@ -132,6 +148,11 @@ final class AppSettings: ObservableObject {
     @Published var hasPickedDisplay = false
     @Published var displayID = 0.0      // CGDirectDisplayID for the live session (not stable)
     @Published var displayUUID = ""     // STABLE id, persisted + resolved across relaunch/reconnect
+
+    // MARK: onboarding (first-run assistant)
+    @Published var hasOnboarded = false   // full Welcome→Calibration flow completed (or migrated)
+    @Published var onboardingStage = 0    // resume point across the TCC-mandated relaunch
+                                          // 0 welcome, 1 permissions, 2 monitor, 3 calibration
 
     // Derived sign (natural applies identically to one- and two-finger scroll).
     var scrollSign: Double { naturalScroll ? 1 : -1 }
@@ -151,6 +172,8 @@ final class AppSettings: ObservableObject {
         var hasPickedDisplay: Bool
         var displayID: Double
         var displayUUID: String?
+        var hasOnboarded: Bool?       // optional: absent in pre-onboarding settings files
+        var onboardingStage: Int?
         var edgeGestures: Bool?
         var edgeDwellMS: Double?
         var edgePull: Double?
@@ -175,6 +198,7 @@ final class AppSettings: ObservableObject {
         var deckBackground: String?
         var deckOpacity: Double?
         var deckTheme: String?
+        var licenseKey: String?       // optional: absent in pre-licensing settings files
     }
 
     static let url = FileManager.default.homeDirectoryForCurrentUser
@@ -206,6 +230,7 @@ final class AppSettings: ObservableObject {
                  restoreDelayMS: restoreDelayMS, pageSwipePts: pageSwipePts,
                  calXMin: calXMin, calXMax: calXMax, calYMin: calYMin, calYMax: calYMax,
                  hasPickedDisplay: hasPickedDisplay, displayID: displayID, displayUUID: displayUUID,
+                 hasOnboarded: hasOnboarded, onboardingStage: onboardingStage,
                  edgeGestures: edgeGestures, edgeDwellMS: edgeDwellMS, edgePull: edgePull,
                  edgeZonePts: edgeZonePts, showEdgeZones: showEdgeZones,
                  keyboardOpacity: keyboardOpacity, keyboardExtendedKeys: keyboardExtendedKeys,
@@ -217,7 +242,8 @@ final class AppSettings: ObservableObject {
                  panelBlur: panelBlur, keyPressFeedback: keyPressFeedback,
                  keyPopup: keyPopup, deckCellSize: deckCellSize,
                  panelFrames: panelFrames, deckBackground: deckBackground,
-                 deckOpacity: deckOpacity, deckTheme: deckTheme)
+                 deckOpacity: deckOpacity, deckTheme: deckTheme,
+                 licenseKey: licenseKey)
     }
 
     private func apply(_ s: Snapshot) {
@@ -239,6 +265,11 @@ final class AppSettings: ObservableObject {
         calXMin = s.calXMin; calXMax = s.calXMax; calYMin = s.calYMin; calYMax = s.calYMax
         hasPickedDisplay = s.hasPickedDisplay; displayID = s.displayID
         displayUUID = s.displayUUID ?? ""
+        // MIGRATION: settings files from before onboarding existed have no
+        // hasOnboarded key. A user who already picked a display has a working
+        // setup — never funnel them through the full first-run flow.
+        hasOnboarded = s.hasOnboarded ?? s.hasPickedDisplay
+        onboardingStage = s.onboardingStage ?? 0
         edgeGestures = s.edgeGestures ?? true
         edgeDwellMS = s.edgeDwellMS ?? 0
         edgePull = s.edgePull ?? 30
@@ -263,6 +294,7 @@ final class AppSettings: ObservableObject {
         deckBackground = s.deckBackground ?? "blur"
         deckOpacity = s.deckOpacity ?? 0.9
         deckTheme = s.deckTheme ?? "midnight"
+        licenseKey = s.licenseKey ?? ""   // didSet recomputes proUnlocked
     }
 
     func save() {
@@ -279,8 +311,13 @@ final class AppSettings: ObservableObject {
         apply(s)
     }
 
-    /// Restore every value to its built-in default.
-    func resetToDefaults() { apply(AppSettings.defaults) }
+    /// Restore every value to its built-in default — but NEVER revoke a paid
+    /// license: a settings reset is a behavior reset, not a de-activation.
+    func resetToDefaults() {
+        let key = licenseKey
+        apply(AppSettings.defaults)
+        licenseKey = key
+    }
 
     private static let defaults = Snapshot(
         gestureMode: .smooth, threeFingerEnabled: true,
@@ -292,13 +329,14 @@ final class AppSettings: ObservableObject {
         magnifyGain: 3.0, twoCommit: 12, pinchBias: 1.6, restoreDelayMS: 20, pageSwipePts: 110,
         calXMin: 0, calXMax: 2624, calYMin: 0, calYMax: 1856,
         hasPickedDisplay: false, displayID: 0, displayUUID: "",
+        hasOnboarded: false, onboardingStage: 0,
         edgeGestures: true, edgeDwellMS: 0, edgePull: 30, edgeZonePts: 72,
         showEdgeZones: false, keyboardOpacity: 0.85,
         keyboardExtendedKeys: true, keyboardLayout: "us", keyboardNumpad: false,
-        showFloatingControl: false, showTrackpad: false, trackpadGain: 1.5,
+        showFloatingControl: true, showTrackpad: false, trackpadGain: 1.5,
         palmRejection: true, palmPanelGuard: true, palmClusterPts: 56,
         showDeck: false, panelBlur: true,
         keyPressFeedback: true, keyPopup: true, deckCellSize: 104,
         panelFrames: [:], deckBackground: "blur", deckOpacity: 0.9,
-        deckTheme: "midnight")
+        deckTheme: "midnight", licenseKey: nil)
 }

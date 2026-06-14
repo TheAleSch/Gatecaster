@@ -4,6 +4,20 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# --- pre-release reminders (see docs/PRE-RELEASE-CHECKLIST.md) ---------------
+# These self-clear once you replace the dev stubs. We only WARN here so dev app
+# builds keep working; release.sh turns the dev-key case into a hard block.
+DEV_KEY='fU82foP+k9x5MzK4CJ104ImU1WhNZ7oxrOAdrXZIgm8='
+warn_dev_key=0; warn_url=0
+grep -q "$DEV_KEY" Sources/Gatecaster/License.swift && warn_dev_key=1 || true
+grep -q 'https://gatecaster.app/buy' Sources/Gatecaster/main.swift && warn_url=1 || true
+if [ "$warn_dev_key" = 1 ] || [ "$warn_url" = 1 ]; then
+  echo "⚠️  PRE-RELEASE REMINDERS (docs/PRE-RELEASE-CHECKLIST.md):"
+  [ "$warn_dev_key" = 1 ] && echo "   • License.swift still uses the DEV signing key — regenerate: swift scripts/gen-keypair.swift" || true
+  [ "$warn_url" = 1 ] && echo "   • main.swift purchaseURL is still the placeholder — set your real checkout URL" || true
+  echo ""
+fi
+
 APP=dist/Gatecaster.app
 
 echo "▸ swift build (release)"

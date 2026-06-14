@@ -1,0 +1,28 @@
+{
+  "v": 2,
+  "id": "com.example.heartbeat",
+  "name": "Heartbeat",
+  "symbol": "waveform.path.ecg",
+  "colorHex": "#FF2D55",
+  "minW": 2, "minH": 1, "defaultW": 2, "defaultH": 2,
+
+  "view": { "kind": "declarative" },
+
+  "fields": [
+    { "label": "Tick", "refreshKey": "tick" },
+    { "label": "Time", "refreshKey": "time" },
+    { "label": "Last ping", "refreshKey": "pong", "value": "—" }
+  ],
+
+  "buttons": [
+    { "symbol": "bolt.fill", "label": "Ping", "run": "ping" }
+  ],
+
+  "actions": {
+    "ping": { "kind": "provider", "value": "ping", "then": "refresh" }
+  },
+
+  "provider": { "command": "zsh provider.sh", "caps": ["state"] },
+
+  "capabilities": ["process"]
+}
