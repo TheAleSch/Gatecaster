@@ -1,0 +1,51 @@
+<h2>Welcome screen — which style?</h2>
+<p class="subtitle">Raycast-inspired centered window, ~520×580. Both follow system light/dark; shown dark here.</p>
+
+<div class="cards">
+  <div class="card" data-choice="hero" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0a0a0a;display:flex;align-items:center;justify-content:center;padding:24px">
+      <div style="background:linear-gradient(180deg,#202022,#19191b);border:1px solid #38383a;border-radius:14px;width:300px;padding:28px 24px 18px;color:#eee;box-shadow:0 12px 40px rgba(0,0,0,.7);text-align:center">
+        <div style="font-size:44px;margin-bottom:10px">👆</div>
+        <div style="font-size:19px;font-weight:700;letter-spacing:-.3px">Welcome to Gatecaster</div>
+        <div style="font-size:11.5px;opacity:.6;margin-top:6px;line-height:1.5">Your touchscreen becomes a full Mac input device — taps, gestures, keyboard, and a control deck.</div>
+        <div style="margin:18px 0 14px;display:flex;flex-direction:column;gap:8px;text-align:left">
+          <div style="display:flex;gap:8px;align-items:center;font-size:11px"><span style="opacity:.9">🖐️</span><span><b>Native gestures</b> — pinch, rotate, momentum scroll</span></div>
+          <div style="display:flex;gap:8px;align-items:center;font-size:11px"><span style="opacity:.9">⌨️</span><span><b>Touch keyboard & trackpad</b> — on-screen, anywhere</span></div>
+          <div style="display:flex;gap:8px;align-items:center;font-size:11px"><span style="opacity:.9">🎛️</span><span><b>Deck</b> — Stream Deck-style control surface</span></div>
+        </div>
+        <div style="background:#4a8cff;border-radius:8px;padding:8px;font-size:12.5px;font-weight:600;color:#fff">Get Started</div>
+        <div style="display:flex;gap:5px;justify-content:center;margin-top:12px">
+          <div style="width:6px;height:6px;border-radius:3px;background:#4a8cff"></div>
+          <div style="width:6px;height:6px;border-radius:3px;background:#48484a"></div>
+          <div style="width:6px;height:6px;border-radius:3px;background:#48484a"></div>
+          <div style="width:6px;height:6px;border-radius:3px;background:#48484a"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Icon + feature bullets</h3>
+      <p>Raycast classic: hero icon, headline, three feature rows, single CTA, progress dots.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="minimal" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0a0a0a;display:flex;align-items:center;justify-content:center;padding:24px">
+      <div style="background:linear-gradient(180deg,#202022,#19191b);border:1px solid #38383a;border-radius:14px;width:300px;padding:40px 24px 18px;color:#eee;box-shadow:0 12px 40px rgba(0,0,0,.7);text-align:center">
+        <div style="font-size:58px;margin-bottom:14px">👆</div>
+        <div style="font-size:21px;font-weight:700;letter-spacing:-.3px">Welcome to Gatecaster</div>
+        <div style="font-size:12px;opacity:.6;margin-top:8px;line-height:1.55;padding:0 8px">Let's set up your touchscreen. This takes about a minute: grant two permissions, point us at the right display, and calibrate.</div>
+        <div style="background:#4a8cff;border-radius:8px;padding:8px;font-size:12.5px;font-weight:600;color:#fff;margin-top:26px">Get Started</div>
+        <div style="display:flex;gap:5px;justify-content:center;margin-top:12px">
+          <div style="width:6px;height:6px;border-radius:3px;background:#4a8cff"></div>
+          <div style="width:6px;height:6px;border-radius:3px;background:#48484a"></div>
+          <div style="width:6px;height:6px;border-radius:3px;background:#48484a"></div>
+          <div style="width:6px;height:6px;border-radius:3px;background:#48484a"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Minimal, sets expectations</h3>
+      <p>Big icon, headline, one paragraph telling the user what the next 3 steps are. Less to read.</p>
+    </div>
+  </div>
+</div>

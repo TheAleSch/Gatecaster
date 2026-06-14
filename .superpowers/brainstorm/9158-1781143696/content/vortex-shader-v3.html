@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Gatecaster — vortex intro (shader v3)</title>
+<style>
+  html,body { margin:0; height:100%; background:#000; overflow:hidden; }
+  canvas { position:fixed; inset:0; width:100vw; height:100vh; }
+  #ui { position:fixed; top:14px; left:50%; transform:translateX(-50%); color:#aaa;
+        font:12px -apple-system,system-ui,sans-serif; background:rgba(20,20,24,.8);
+        border:1px solid #333; border-radius:8px; padding:6px 14px; z-index:10;
+        display:flex; gap:12px; align-items:center }
+  #ui button { background:#7a5cff; color:#fff; border:0; border-radius:6px; padding:4px 12px;
+               font-size:12px; cursor:pointer }
+  #err { position:fixed; bottom:10px; left:10px; right:10px; color:#ff8080;
+         font:12px monospace; z-index:20; white-space:pre-wrap }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="txt"></canvas>
+<div id="ui"><span id="phaseLabel">fill</span><button id="replay">Replay</button></div>
+<div id="err"></div>
+
+<script>
+window.onerror = function (m, s, l) {
+  document.getElementById('err').textContent = 'JS error: ' + m + ' (line ' + l + ')';
+};
+
+(function () {
+'use strict';
+var err = function (m) { document.getElementById('err').textContent = m; };
+
+var glc = document.getElementById('gl');
+var gl = glc.getContext('webgl');
+if (!gl) { err('WebGL unavailable'); return; }
+var tc = document.getElementById('txt');
+var tx = tc.getContext('2d');
+
+var VS = 'attribute vec2 p; void main(){ gl_Position = vec4(p,0.,1.); }';
+
+var FS = [
+'precision highp float;',
+'uniform vec2 R;',
+'uniform float T;',
+'uniform vec2 WIN;',
+'',
+'const float TAU = 6.2831853;',
+'const float FILL_END = 1.6;',
+'const float SUCK_END = 4.6;',
+'const float REVEAL_END = 5.6;',
+'',
+'float hash21(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }',
+'float ease(float u){ u = clamp(u,0.,1.); return u*u*(3.-2.*u); }',
+'',
+'// log-polar star layer; y wraps every `cells` so the angular seam is invisible.',
+'// `stretch` elongates stars along the angular (spiral) direction.',
+'float starLayerLP(vec2 uv, float cells, float t, float fillT, float stretch){',
+'  vec2 id = floor(uv);',
+'  id.y = mod(id.y, cells);',
+'  vec2 gv = fract(uv)-.5;',
+'  float h = hash21(id);',
+'  if (h < .88) return 0.;',
+'  vec2 off = (vec2(hash21(id+1.1), hash21(id+2.7)) - .5)*.7;',
+'  vec2 d2 = gv - off;',
+'  // anisotropic falloff: radial (x) tightened, angular (y) relaxed → streak',
+'  float d = sqrt(d2.x*d2.x*(1.+stretch*5.) + d2.y*d2.y/(1.+stretch*18.));',
+'  float birth = fract(h*7.13)*1.4;',
+'  float alive = smoothstep(birth, birth+.6, fillT);',
+'  float tw = .55 + .45*sin(t*3. + h*40.);',
+'  return exp(-d*d*340.) * tw * alive;',
+'}',
+'',
+'float field(vec2 p, float t, float suck, float fillT, float swirlOff){',
+'  float r = length(p);',
+'  float a = atan(p.y, p.x);',
+'  float maxR = length(R)*.5;',
+'  float rs = mix(r, r*5. + 60., suck*suck);',
+'  float swirl = (suck*6. + swirlOff) * exp(-r/maxR*2.5);',
+'  float a2 = a + swirl;',
+'  float lr = log(rs + 30.);',
+'  float stretch = suck * clamp(420./max(r,30.), .3, 7.);',
+'  float m  = starLayerLP(vec2(lr*6.,        a2/TAU*48.),  48., t,     fillT, stretch);',
+'  m += .8 * starLayerLP(vec2(lr*9. + 17.,   a2/TAU*80.),  80., t*1.3, fillT, stretch);',
+'  m += .5 * starLayerLP(vec2(lr*13. + 41.,  a2/TAU*128.), 128., t*.8, fillT, stretch);',
+'  return m;',
+'}',
+'',
+'// calm round stars confined in the window after collapse (plain cartesian grid)',
+'float calmLayer(vec2 uv, float t){',
+'  vec2 id = floor(uv), gv = fract(uv)-.5;',
+'  float h = hash21(id);',
+'  if (h < .88) return 0.;',
+'  vec2 off = (vec2(hash21(id+1.1), hash21(id+2.7)) - .5)*.7;',
+'  float d = length(gv - off);',
+'  float tw = .55 + .45*sin(t*2.2 + h*40.);',
+'  return exp(-d*d*340.) * tw;',
+'}',
+'float calmField(vec2 p, float t){',
+'  vec2 uv = p + vec2(sin(t*.21), cos(t*.17))*6.;',
+'  return calmLayer(uv*.02, t) + .7*calmLayer(uv*.045 + 7., t*1.2);',
+'}',
+'',
+'float roundRectSD(vec2 p, vec2 hsz, float rad){',
+'  vec2 q = abs(p) - hsz + rad;',
+'  return length(max(q,0.)) + min(max(q.x,q.y),0.) - rad;',
+'}',
+'',
+'void main(){',
+'  vec2 p = gl_FragCoord.xy - R*.5;',
+'  p.y = -p.y;',
+'  float t = T;',
+'  float suck   = ease((t-FILL_END)/(SUCK_END-FILL_END));',
+'  float reveal = ease((t-SUCK_END)/(REVEAL_END-SUCK_END));',
+'  float r = length(p);',
+'',
+'  vec3 col = vec3(0.);    // pure black space',
+'',
+'  // EXAGGERATED chromatic aberration: per-channel swirl offset, ~3x stronger',
+'  float ab = suck * clamp(300./max(r,40.), 0., 4.) * .12;',
+'  float fr = field(p, t, suck, t,  ab);',
+'  float fg = field(p, t, suck, t,  0.);',
+'  float fb = field(p, t, suck, t, -ab);',
+'  vec3 stars = vec3(fr*1.1, fg*.9, fb*1.25);',
+'  stars *= (1. - reveal);',
+'  col += stars;',
+'',
+'  // event horizon ring with chromatic fringe',
+'  float hr = 26. + 40.*(1.-suck);',
+'  float flash = t > SUCK_END ? max(0., 1.-(t-SUCK_END)*1.6) : 0.;',
+'  float ringA = t < SUCK_END ? suck*.9 : flash;',
+'  if (ringA > .01){',
+'    float w = 14. + flash*40.;',
+'    float rr = hr + flash*40.;',
+'    col.r += exp(-pow(r-(rr-5.),2.)/w) * ringA * .9;',
+'    col.g += exp(-pow(r- rr     ,2.)/w) * ringA * .5;',
+'    col.b += exp(-pow(r-(rr+5.),2.)/w) * ringA * 1.1;',
+'    col += vec3(.5,.42,1.) * exp(-r/(hr*2.5+flash*120.)) * ringA * .4;',
+'  }',
+'',
+'  if (t > SUCK_END){',
+'    vec2 hsz = WIN*.5*(0.2+0.8*reveal);',
+'    float sd = roundRectSD(p, hsz, 18.);',
+'    float inside = smoothstep(1.5, -1.5, sd);',
+'    col *= mix(1., .05, reveal * (1.-inside));',
+'    col = mix(col, vec3(.012,.012,.022), inside*reveal*.94);',
+'    float em = ease((t-SUCK_END)/1.4);',
+'    float cf = calmField(p, t);',
+'    col += vec3(cf*.85, cf*.8, cf*1.05) * inside * em;',
+'    col += vec3(.55,.47,1.) * exp(-abs(sd)*.35) * reveal * .3;',
+'  }',
+'',
+'  gl_FragColor = vec4(col, 1.);',
+'}'
+].join('\n');
+
+function shader(type, src) {
+  var s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    err('shader: ' + gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
+}
+var prog = gl.createProgram();
+var vs = shader(gl.VERTEX_SHADER, VS), fs = shader(gl.FRAGMENT_SHADER, FS);
+if (!vs || !fs) return;
+gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { err('link: ' + gl.getProgramInfoLog(prog)); return; }
+gl.useProgram(prog);
+
+var buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+var loc = gl.getAttribLocation(prog, 'p');
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+var uR = gl.getUniformLocation(prog, 'R');
+var uT = gl.getUniformLocation(prog, 'T');
+var uW = gl.getUniformLocation(prog, 'WIN');
+
+var W, H, DPR, winW, winH;
+function size() {
+  DPR = window.devicePixelRatio || 1;
+  W = window.innerWidth; H = window.innerHeight;
+  glc.width = W*DPR; glc.height = H*DPR;
+  tc.width = W*DPR; tc.height = H*DPR;
+  tx.setTransform(DPR,0,0,DPR,0,0);
+  gl.viewport(0, 0, glc.width, glc.height);
+  winW = Math.min(560, W*.55); winH = Math.min(480, H*.7);
+}
+window.addEventListener('resize', size);
+size();
+
+var SUCK_END = 4.6, REVEAL_END = 5.6;
+var t0 = performance.now();
+document.getElementById('replay').onclick = function () { t0 = performance.now(); };
+
+function drawText(t) {
+  tx.clearRect(0, 0, W, H);
+  var a = Math.min(1, Math.max(0, (t - REVEAL_END + .15) * 1.4));
+  if (a <= 0) return;
+  var cx = W/2, top = H/2 - winH/2;
+  tx.globalAlpha = a;
+  tx.textAlign = 'center';
+  tx.fillStyle = '#ecebf5';
+  tx.font = '700 26px -apple-system, system-ui, sans-serif';
+  tx.fillText('Welcome to Gatecaster', cx, top + 84);
+  tx.fillStyle = 'rgba(236,235,245,.62)';
+  tx.font = '13px -apple-system, system-ui, sans-serif';
+  tx.fillText('Your touchscreen, cast into a true Mac input surface.', cx, top + 110);
+  tx.textAlign = 'left';
+  var lx = cx - winW/2 + 70, ly = top + 168;
+  var rows = [
+    ['🌀', 'Open the gate', ' — pointer, taps, native gestures'],
+    ['✨', 'Cast across space', ' — pinch, rotate, momentum scroll'],
+    ['🛰️', 'Summon controls', ' — keyboard, trackpad & deck']
+  ];
+  for (var i = 0; i < 3; i++) {
+    tx.font = '13px -apple-system, system-ui, sans-serif';
+    tx.fillStyle = 'rgba(236,235,245,.9)';
+    tx.fillText(rows[i][0], lx, ly);
+    tx.font = '600 13px -apple-system, system-ui, sans-serif';
+    var x2 = lx + 26;
+    tx.fillText(rows[i][1], x2, ly);
+    var w2 = tx.measureText(rows[i][1]).width;
+    tx.font = '13px -apple-system, system-ui, sans-serif';
+    tx.fillStyle = 'rgba(236,235,245,.6)';
+    tx.fillText(rows[i][2], x2 + w2, ly);
+    ly += 30;
+  }
+  var bw = 200, bh = 38, bx = cx - bw/2, by = top + winH - 96;
+  var g = tx.createLinearGradient(0, by, 0, by + bh);
+  g.addColorStop(0, '#7a5cff'); g.addColorStop(1, '#5b3df0');
+  tx.fillStyle = g;
+  tx.beginPath();
+  tx.moveTo(bx+9, by);
+  tx.arcTo(bx+bw, by, bx+bw, by+bh, 9);
+  tx.arcTo(bx+bw, by+bh, bx, by+bh, 9);
+  tx.arcTo(bx, by+bh, bx, by, 9);
+  tx.arcTo(bx, by, bx+bw, by, 9);
+  tx.fill();
+  tx.fillStyle = '#fff';
+  tx.textAlign = 'center';
+  tx.font = '600 13px -apple-system, system-ui, sans-serif';
+  tx.fillText('Get Started', cx, by + 24);
+  var dy = top + winH - 36;
+  for (var d = 0; d < 4; d++) {
+    tx.beginPath();
+    tx.arc(cx - 21 + d*14, dy, 3, 0, 7);
+    tx.fillStyle = d === 0 ? '#7a5cff' : 'rgba(255,255,255,.22)';
+    tx.fill();
+  }
+  tx.globalAlpha = 1;
+}
+
+function frame(now) {
+  var t = (now - t0) / 1000;
+  gl.uniform2f(uR, glc.width, glc.height);
+  gl.uniform1f(uT, t);
+  gl.uniform2f(uW, winW*DPR, winH*DPR);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  drawText(t);
+  document.getElementById('phaseLabel').textContent =
+    t < 1.6 ? 'fill' : t < SUCK_END ? 'vortex suck' : t < REVEAL_END ? 'event horizon' : 'confined';
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

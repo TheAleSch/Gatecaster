@@ -1,0 +1,48 @@
+<h2>Monitor step: inside the window, or hand off to full-screen overlays?</h2>
+<p class="subtitle">Welcome / Permissions / Calibration-intro live in a centered Raycast-style window either way. Question is what happens at the "which screen is the touchscreen?" step.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Hand off to existing full-screen picker</h3>
+      <p>Onboarding window hides → today's numbered overlays appear on every display → user taps/presses number → onboarding window returns at calibration-intro step. Reuses DisplayPickerView as-is.</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header">Step 3 of 4 — hands off</div>
+        <div class="mockup-body" style="background:#111;padding:18px;display:flex;gap:14px;justify-content:center">
+          <div style="background:#1c1c1e;border:1px solid #333;border-radius:8px;width:200px;height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#eee">
+            <div style="font-size:42px;font-weight:700">1</div>
+            <div style="font-size:11px;opacity:.6">Built-in Display</div>
+          </div>
+          <div style="background:#1c1c1e;border:1px solid #4a8cff;border-radius:8px;width:200px;height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#eee">
+            <div style="font-size:42px;font-weight:700">2</div>
+            <div style="font-size:11px;opacity:.6">V17UT — tap me</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Monitor list inside the onboarding window</h3>
+      <p>Window stays put; shows a row per connected display with an "Identify" button that flashes numbers on the physical screens (like System Settings → Displays). User clicks the row for the touchscreen. New UI, but flow never leaves the window.</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header">Step 3 of 4 — stays in window</div>
+        <div class="mockup-body" style="background:#1c1c1e;padding:18px;color:#eee">
+          <div style="font-size:15px;font-weight:600;margin-bottom:10px">Which display is the touchscreen?</div>
+          <div style="background:#2a2a2c;border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:13px">① Built-in Display</span><span style="font-size:11px;opacity:.5">2560×1664</span>
+          </div>
+          <div style="background:#2a2a2c;border:1px solid #4a8cff;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:13px">② V17UT</span><span style="font-size:11px;opacity:.5">1920×1080</span>
+          </div>
+          <div style="text-align:right;margin-top:10px"><button class="mock-button" style="font-size:12px">Identify Displays</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:16px">Note: A is less new code and touch-friendly (tap the actual screen). B is more Raycast-polished but the user must know which name/number is which — likely still needs the flash overlays anyway.</p>

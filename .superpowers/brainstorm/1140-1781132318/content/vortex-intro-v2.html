@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Gatecaster — vortex intro demo v2</title>
+<style>
+  html,body { margin:0; height:100%; background:#000; overflow:hidden; font-family:-apple-system,system-ui,sans-serif; }
+  canvas { position:fixed; inset:0; }
+  #ui { position:fixed; top:14px; left:50%; transform:translateX(-50%); color:#aaa; font-size:12px;
+        background:rgba(20,20,24,.8); border:1px solid #333; border-radius:8px; padding:6px 14px; z-index:10;
+        display:flex; gap:12px; align-items:center }
+  #ui button { background:#7a5cff; color:#fff; border:0; border-radius:6px; padding:4px 12px; font-size:12px; cursor:pointer }
+  #err { position:fixed; bottom:10px; left:10px; right:10px; color:#ff8080; font:12px monospace; z-index:20; white-space:pre-wrap }
+  #winText { position:fixed; color:#eee; text-align:center; opacity:0; z-index:5; pointer-events:none; }
+  #winText h1 { font-size:24px; margin:0 0 6px; letter-spacing:-.4px }
+  #winText p { font-size:12.5px; opacity:.65; margin:0 0 16px }
+  #winText .rows { text-align:left; display:inline-block; font-size:12.5px; line-height:2 }
+  #winText .cta { margin-top:16px; display:inline-block; background:linear-gradient(180deg,#7a5cff,#5b3df0);
+                  border-radius:9px; padding:9px 40px; font-size:13px; font-weight:600; color:#fff }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="winText">
+  <h1>Welcome to Gatecaster</h1>
+  <p>Your touchscreen, cast into a true Mac input surface.</p>
+  <div class="rows">🌀 <b>Open the gate</b> — pointer, taps, native gestures<br>
+  ✨ <b>Cast across space</b> — pinch, rotate, momentum scroll<br>
+  🛰️ <b>Summon controls</b> — keyboard, trackpad &amp; deck</div><br>
+  <span class="cta">Get Started</span>
+</div>
+<div id="ui"><span id="phaseLabel">phase: fill</span><button id="replay">Replay</button></div>
+<div id="err"></div>
+
+<script>
+window.onerror = function(m, s, l) {
+  document.getElementById('err').textContent = 'JS error: ' + m + ' (line ' + l + ')';
+};
+
+(function () {
+  'use strict';
+  var cv = document.getElementById('c');
+  var ctx = cv.getContext('2d');
+  var W, H, CX, CY;
+
+  function roundedRectPath(c, x, y, w, h, r) {   // manual — no ctx.roundRect dependency
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+  }
+
+  function size() {
+    var dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    CX = W / 2; CY = H / 2;
+  }
+  window.addEventListener('resize', size);
+  size();
+
+  var N = 380, stars = [], t0 = performance.now();
+  function reset() {
+    stars = [];
+    for (var i = 0; i < N; i++) {
+      var x = Math.random() * W, y = Math.random() * H;
+      stars.push({
+        r: Math.hypot(x - CX, y - CY),
+        a: Math.atan2(y - CY, x - CX),
+        sz: 0.6 + Math.random() * 1.8,
+        tw: Math.random() * 6.28,
+        born: Math.random() * 1.4,
+        hx: Math.random() - 0.5,
+        hy: Math.random() - 0.5,
+        drift: 0.1 + Math.random() * 0.35
+      });
+    }
+    t0 = performance.now();
+    document.getElementById('winText').style.opacity = 0;
+  }
+  document.getElementById('replay').onclick = reset;
+
+  var FILL_END = 1.6, SUCK_END = 4.6, REVEAL_END = 5.6;
+  function ease(u) { return u < 0 ? 0 : u > 1 ? 1 : u * u * (3 - 2 * u); }
+
+  function frame(now) {
+    try {
+      var t = (now - t0) / 1000;
+      var WW = Math.min(560, W * 0.55), WH = Math.min(460, H * 0.68);
+      ctx.clearRect(0, 0, W, H);
+
+      var bg = ctx.createRadialGradient(CX, CY * 0.4, 0, CX, CY, Math.max(W, H) * 0.8);
+      bg.addColorStop(0, '#16102b'); bg.addColorStop(0.5, '#0a0a12'); bg.addColorStop(1, '#040406');
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+      var phase = t < FILL_END ? 'fill' : t < SUCK_END ? 'vortex suck' : t < REVEAL_END ? 'event horizon' : 'confined';
+      document.getElementById('phaseLabel').textContent = 'phase: ' + phase;
+
+      var suck = ease((t - FILL_END) / (SUCK_END - FILL_END));
+      var reveal = ease((t - SUCK_END) / (REVEAL_END - SUCK_END));
+      var horizonR = 26 + 40 * Math.max(0, 1 - suck);
+
+      ctx.globalCompositeOperation = 'lighter';
+
+      for (var i = 0; i < stars.length; i++) {
+        var s = stars[i];
+        var alive = Math.min(1, (t - s.born) / 0.6);
+        if (alive <= 0) continue;
+        var x, y, alpha, ab;
+        if (t < SUCK_END) {
+          var pull = suck * suck;
+          var r = Math.max(horizonR, s.r * (1 - pull) + horizonR * pull);
+          var swirl = suck * 7 * (1 - r / Math.hypot(CX, CY));
+          var a = s.a + swirl;
+          x = CX + r * Math.cos(a); y = CY + r * Math.sin(a);
+          alpha = alive * (0.5 + 0.5 * Math.sin(s.tw + t * 3));
+          ab = suck * Math.min(8, 600 / Math.max(r, 40));
+          if (r <= horizonR + 1) alpha *= 0.25;
+        } else {
+          var em = ease(Math.min(1, (t - SUCK_END) / 1.4));
+          var wx = CX + s.hx * WW * 0.92, wy = CY + s.hy * WH * 0.92;
+          x = CX + (wx - CX) * em + Math.sin(t * s.drift + s.tw) * 2;
+          y = CY + (wy - CY) * em + Math.cos(t * s.drift * 1.3 + s.tw) * 2;
+          alpha = 0.25 + 0.5 * em * (0.5 + 0.5 * Math.sin(s.tw + t * 2));
+          ab = (1 - em) * 4;
+        }
+        var dx = x - CX, dy = y - CY, d = Math.hypot(dx, dy) || 1;
+        var ux = dx / d, uy = dy / d;
+        var passes = [[255, 80, 80, -1], [120, 255, 140, 0], [110, 150, 255, 1]];
+        for (var p = 0; p < 3; p++) {
+          var c = passes[p];
+          ctx.fillStyle = 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + (alpha * 0.55) + ')';
+          ctx.beginPath();
+          ctx.arc(x + ux * ab * c[3], y + uy * ab * c[3], s.sz, 0, 6.3);
+          ctx.fill();
+        }
+      }
+
+      if (t > FILL_END) {
+        var flash = t > SUCK_END ? Math.max(0, 1 - (t - SUCK_END) * 1.6) : 0;
+        var ringA = t < SUCK_END ? suck * 0.9 : flash;
+        if (ringA > 0.01) {
+          var rings = [['255,70,70', -2], ['170,140,255', 0], ['90,140,255', 2]];
+          for (var q = 0; q < 3; q++) {
+            ctx.strokeStyle = 'rgba(' + rings[q][0] + ',' + ringA + ')';
+            ctx.lineWidth = 2 + flash * 6;
+            ctx.beginPath();
+            ctx.arc(CX, CY, horizonR + rings[q][1] + flash * 40, 0, 6.3);
+            ctx.stroke();
+          }
+          var glow = ctx.createRadialGradient(CX, CY, 0, CX, CY, horizonR * 3 + flash * 120);
+          glow.addColorStop(0, 'rgba(140,110,255,' + (0.35 * ringA) + ')');
+          glow.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+        }
+      }
+
+      ctx.globalCompositeOperation = 'source-over';
+
+      if (t > SUCK_END) {
+        var u = reveal;
+        var rw = WW * (0.2 + 0.8 * u), rh = WH * (0.2 + 0.8 * u);
+        ctx.save();
+        ctx.globalAlpha = u;
+        ctx.beginPath();
+        roundedRectPath(ctx, CX - rw / 2, CY - rh / 2, rw, rh, 18);
+        ctx.fillStyle = 'rgba(16,14,26,.55)';
+        ctx.strokeStyle = 'rgba(140,120,255,.45)';
+        ctx.lineWidth = 1.2;
+        ctx.fill(); ctx.stroke();
+        ctx.restore();
+        if (u > 0.5) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(0, 0, W, H);
+          roundedRectPath(ctx, CX - rw / 2, CY - rh / 2, rw, rh, 18);
+          ctx.fillStyle = 'rgba(0,0,0,' + ((u - 0.5) * 1.7) + ')';
+          ctx.fill('evenodd');
+          ctx.restore();
+        }
+        var txt = document.getElementById('winText');
+        txt.style.opacity = Math.max(0, (t - REVEAL_END + 0.2)) * 1.2;
+        txt.style.left = (CX - WW / 2) + 'px';
+        txt.style.top = (CY - WH / 2 + 44) + 'px';
+        txt.style.width = WW + 'px';
+      }
+    } catch (e) {
+      document.getElementById('err').textContent = 'JS error: ' + e.message;
+    }
+    requestAnimationFrame(frame);
+  }
+
+  reset();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
