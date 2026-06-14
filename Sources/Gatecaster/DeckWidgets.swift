@@ -1290,6 +1290,11 @@ private struct InteractiveFieldView: View {
     @State private var dragValue: Double? = nil   // owns the value once the user drags
     @State private var lastSent = Date.distantPast
     @State private var rectID = UUID()
+    // Dial only: previous touch angle for RELATIVE turning, and whether the finger
+    // actually moved this gesture — so a tap doesn't jump or fire (a knob changes
+    // by rotation, not by where you land).
+    @State private var lastAngle: Double? = nil
+    @State private var turned = false
 
     private var lo: Double { field.min ?? 0 }
     // Guard hi > lo so the (hi-lo) divisor can't be 0/negative (→ NaN → Int crash).
@@ -1310,13 +1315,18 @@ private struct InteractiveFieldView: View {
         .onDisappear { DeckDragRegions.dragRects[rectID] = nil }
     }
 
-    // Commit a 0..1 fraction → value, throttled while dragging (always on release).
-    private func commit(frac f: CGFloat, throttled: Bool) {
-        let v = lo + Double(Swift.min(1, Swift.max(0, f))) * (hi - lo)
-        dragValue = v
+    // Commit an absolute value (clamped), throttled while dragging.
+    private func commitValue(_ v: Double, throttled: Bool) {
+        let clamped = Swift.min(hi, Swift.max(lo, v))
+        dragValue = clamped
         if !throttled || Date().timeIntervalSince(lastSent) > 0.1 {
-            lastSent = Date(); onSet(v)
+            lastSent = Date(); onSet(clamped)
         }
+    }
+
+    // Slider: a 0..1 fraction → absolute value (tap-to-position is fine for a bar).
+    private func commit(frac f: CGFloat, throttled: Bool) {
+        commitValue(lo + Double(Swift.min(1, Swift.max(0, f))) * (hi - lo), throttled: throttled)
     }
 
     private var slider: some View {
@@ -1343,37 +1353,89 @@ private struct InteractiveFieldView: View {
         .frame(height: isHorizontal ? 18 : 60)
     }
 
+    /// Skeuomorphic rotary knob. A 270° value sweep (lo at 7:30 → hi at 4:30, gap
+    /// at the bottom) drawn as: a tick-marked dished bezel, a metallic domed cap
+    /// (radial gradient + top sheen + drop shadow), and a pointer notch that turns
+    /// with the value. The pointer rotation `-135 + frac·270` is the exact inverse
+    /// of the drag's `atan2`-from-top math, so the cap points where the finger is.
     private var dial: some View {
         GeometryReader { geo in
-            // 270° gauge: lo at bottom-left, sweeping clockwise to hi at bottom-
-            // right (gap at the bottom). The trim covers ¾ of the circle; rotating
-            // +135° puts its start at 7:30. The drag math (atan2 from top, ±135°)
-            // is the inverse of this rotation so handle and touch agree.
+            let s = Swift.min(geo.size.width, geo.size.height)
+            let pointerAngle = -135.0 + Double(frac) * 270.0   // 0° = straight up
             ZStack {
+                // Value arc on the bezel: dim track + bright fill, gap at bottom.
                 Circle().trim(from: 0, to: 0.75)
-                    .stroke(Color.secondary.opacity(0.18),
-                            style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .stroke(Color.secondary.opacity(0.20),
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round))
                     .rotationEffect(.degrees(135))
                 Circle().trim(from: 0, to: 0.75 * frac)
-                    .stroke(Color.accentColor.opacity(0.85),
-                            style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .stroke(Color.accentColor,
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round))
                     .rotationEffect(.degrees(135))
+
+                // Tick marks around the active sweep (skeuomorphic gauge dashes).
+                ForEach(0..<11, id: \.self) { i in
+                    Capsule().fill(Color.secondary.opacity(0.35))
+                        .frame(width: 1.5, height: s * 0.05)
+                        .offset(y: -s * 0.43)
+                        .rotationEffect(.degrees(-135 + Double(i) / 10 * 270))
+                }
+
+                // Metallic domed cap: radial gradient (light top-left → dark) for
+                // the dome, a soft top sheen, a rim stroke, and a contact shadow.
+                Circle()
+                    .fill(RadialGradient(
+                        colors: [Color(white: 0.46), Color(white: 0.20), Color(white: 0.12)],
+                        center: UnitPoint(x: 0.34, y: 0.28),
+                        startRadius: 1, endRadius: s * 0.42))
+                    .overlay(Circle().strokeBorder(Color.black.opacity(0.55), lineWidth: 1))
+                    .overlay(
+                        Circle()
+                            .fill(LinearGradient(
+                                colors: [Color.white.opacity(0.28), .clear],
+                                startPoint: .top, endPoint: .center))
+                            .padding(s * 0.06).blur(radius: 1))
+                    .shadow(color: .black.opacity(0.45), radius: 3, y: 2)
+                    .padding(s * 0.18)
+
+                // Pointer notch on the cap — turns with the value.
+                Capsule().fill(Color.white.opacity(0.92))
+                    .frame(width: 3, height: s * 0.17)
+                    .offset(y: -s * 0.16)
+                    .rotationEffect(.degrees(pointerAngle))
+                    .shadow(color: .black.opacity(0.5), radius: 1)
+
                 Text("\(Int(current))")
-                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .font(.system(size: 11, weight: .bold).monospacedDigit())
+                    .foregroundColor(.white.opacity(0.9))
+                    .offset(y: s * 0.04)
             }
-            .padding(4)
-            .contentShape(Rectangle())
+            .frame(width: s, height: s)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Circle())
             .modifier(DragRegion(id: rectID))
+            // RELATIVE turn: the knob changes by how far you ROTATE, not where you
+            // tap. The first touch only records a reference angle (no jump); each
+            // move adds its angular delta (over the 270° sweep) to the value. A
+            // pure tap never moves, so it neither changes nor fires.
             .highPriorityGesture(DragGesture(minimumDistance: 0)
                 .onChanged { g in
                     let cx = geo.size.width / 2, cy = geo.size.height / 2
                     // atan2(dx, -dy): 0 at top (12 o'clock), positive clockwise.
                     let a = atan2(g.location.x - cx, cy - g.location.y) * 180 / .pi
-                    commit(frac: CGFloat((a + 135) / 270), throttled: true)
+                    guard let prev = lastAngle else { lastAngle = a; return }
+                    var d = a - prev
+                    if d > 180 { d -= 360 } else if d < -180 { d += 360 }  // shortest arc
+                    lastAngle = a
+                    turned = true
+                    commitValue(current + Double(d) / 270 * (hi - lo), throttled: true)
                 }
-                .onEnded { _ in onSet(current) })
+                .onEnded { _ in
+                    if turned { onSet(current) }   // skip a no-move tap
+                    lastAngle = nil; turned = false
+                })
         }
-        .frame(height: 70)
+        .frame(height: 86)
     }
 }
 
